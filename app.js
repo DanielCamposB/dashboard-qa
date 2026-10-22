@@ -122,7 +122,9 @@
     $("#avatar").textContent = $("#avatar2").textContent = ini || "?";
     $("#uname").textContent = p.nombres ? p.nombres.split(" ")[0] : nm; $("#uname2").textContent = nm; $("#uemail").textContent = em;
     $("#ucargo").textContent = [p.cargo, p.vertical].filter(Boolean).join(" · "); $("#ucargo").hidden = !$("#ucargo").textContent;
-    $("#urole").textContent = readOnly ? "Solo lectura" : "Editor"; $("#urole").className = "badge " + (readOnly ? "read" : "edit");
+    const roleTxt = D.isAdmin() ? "Administrador" : readOnly ? "Solo lectura" : "Editor";
+    $("#urole").textContent = roleTxt; $("#urole").className = "badge " + (readOnly ? "read" : "edit");
+    $("#tabPerm").hidden = !D.isAdmin();
     if (fullName()) lsSet("qa-author", fullName()); else if (em && !lsGet("qa-author", "")) lsSet("qa-author", em.split("@")[0]);
   }
   function initUserMenu() {
@@ -158,6 +160,7 @@
     }
     btn.disabled = false;
   }
+  const ROLE_TXT = { admin: "Administrador", editor: "Editor", viewer: "Solo lectura" };
   // Directorio de perfiles (solo editores con Supabase)
   let profCache = { at: 0, rows: [] };
   async function renderProfiles() {
@@ -165,7 +168,7 @@
     const draw = rows => {
       const bd = r => (r.cumpleanos ? new Date(r.cumpleanos + "T00:00:00Z").toLocaleDateString("es", { day: "numeric", month: "long", timeZone: "UTC" }) : "—");
       $("#profTbl").innerHTML = "<thead><tr><th>Nombre</th><th>Cargo</th><th>Vertical</th><th>Cumpleaños</th><th>Teléfono</th><th>Correo</th><th>Acceso</th></tr></thead><tbody>" +
-        rows.map(r => `<tr><td>${esc([r.nombres, r.apellido_paterno, r.apellido_materno].filter(Boolean).join(" ")) || '<span class="muted">Sin completar</span>'}</td><td>${esc(r.cargo || "—")}</td><td>${esc(r.vertical || "—")}</td><td>${bd(r)}</td><td>${esc(r.telefono || "—")}</td><td>${esc(r.email)}</td><td>${r.role === "editor" ? "Editor" : "Solo lectura"}</td></tr>`).join("") + "</tbody>";
+        rows.map(r => `<tr><td>${esc([r.nombres, r.apellido_paterno, r.apellido_materno].filter(Boolean).join(" ")) || '<span class="muted">Sin completar</span>'}</td><td>${esc(r.cargo || "—")}</td><td>${esc(r.vertical || "—")}</td><td>${bd(r)}</td><td>${esc(r.telefono || "—")}</td><td>${esc(r.email)}</td><td>${ROLE_TXT[r.role] || r.role}</td></tr>`).join("") + "</tbody>";
     };
     draw(profCache.rows);
     if (Date.now() - profCache.at < 20000) return;
@@ -173,6 +176,33 @@
     try { profCache.rows = await D.listProfiles(); draw(profCache.rows); }
     catch (er) { $("#profTbl").innerHTML = `<tbody><tr><td class="muted">${/does not exist|schema/i.test(er.message) ? "Falta ejecutar supabase-perfil.sql en Supabase." : "No se pudieron cargar los perfiles: " + esc(er.message)}</td></tr></tbody>`; }
   }
+
+  // ---------- Permisos (solo administrador) ----------
+  const permErr = er => { const m = String(er.message || er); return /duplicate key|already exists/i.test(m) ? "Ese correo ya tiene acceso." : /row-level|permission denied|Solo un administrador|sin permiso/i.test(m) ? "No tienes permiso de administrador para hacer esto." : /check constraint|profiles_role_check/i.test(m) ? "Falta ejecutar supabase-admin.sql en Supabase." : /failed to fetch|network/i.test(m) ? "No hay conexión con el servidor." : "Error: " + m; };
+  async function renderPerms() {
+    if (!D.isAdmin()) { $("#v-perm").hidden = true; return; }
+    const tbl = $("#permTbl");
+    try {
+      const rows = await D.listProfiles(), me = D.myEmail();
+      tbl.innerHTML = "<thead><tr><th>Correo</th><th>Nombre</th><th>Permiso</th><th></th></tr></thead><tbody>" + rows.map(r => {
+        const self = r.email === me, nm = [r.nombres, r.apellido_paterno, r.apellido_materno].filter(Boolean).join(" ");
+        return `<tr><td>${esc(r.email)}${self ? ' <span class="badge">tú</span>' : ""}</td><td>${esc(nm) || '<span class="muted">Sin completar</span>'}</td>
+          <td><select data-pe="${esc(r.email)}"${self ? " disabled title=\"No puedes cambiar tu propio permiso\"" : ""}>${Object.entries(ROLE_TXT).map(([k, v]) => `<option value="${k}"${k === r.role ? " selected" : ""}>${v}</option>`).join("")}</select></td>
+          <td>${self ? "" : `<button class="danger" data-pd="${esc(r.email)}">Quitar acceso</button>`}</td></tr>`;
+      }).join("") + "</tbody>";
+      tbl.querySelectorAll("[data-pe]").forEach(s => (s.onchange = async () => {
+        try { await D.setRole(s.dataset.pe, s.value); say("Permiso actualizado ✓"); profCache.at = 0; } catch (er) { say(permErr(er), 1); renderPerms(); }
+      }));
+      tbl.querySelectorAll("[data-pd]").forEach(b => (b.onclick = async () => {
+        if (!confirm(`¿Quitar el acceso a ${b.dataset.pd}? Ya no podrá ver el dashboard.`)) return;
+        try { await D.removeUser(b.dataset.pd); say("Acceso quitado ✓"); profCache.at = 0; renderPerms(); } catch (er) { say(permErr(er), 1); }
+      }));
+    } catch (er) { tbl.innerHTML = `<tbody><tr><td class="muted">${esc(permErr(er))}</td></tr></tbody>`; }
+  }
+  $("#permForm").onsubmit = async e => {
+    e.preventDefault(); const f = e.target, email = f.email.value.trim().toLowerCase();
+    try { await D.addUser(email, f.role.value); f.reset(); say("Acceso otorgado ✓"); profCache.at = 0; renderPerms(); } catch (er) { say(permErr(er), 1); }
+  };
 
   function applyMode() {
     if (D.remote) { $("#mode").disabled = true; $("#mode").parentElement.hidden = true; }
@@ -418,6 +448,7 @@
     if (!$("#v-team").hidden) renderTeam();
     renderClientSel();
     if (!$("#v-team").hidden) renderProfiles();
+    if (!$("#v-perm").hidden) renderPerms();
     if (!$("#v-clients").hidden) renderClients();
     if (!$("#v-tpl").hidden) renderTpl();
   }

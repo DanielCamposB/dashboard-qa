@@ -19,6 +19,7 @@
     <button data-v="gantt">Gantt</button>
     <button data-v="team">Equipo</button>
     <button data-v="clients">Clientes</button>
+    <button data-v="perm" id="tabPerm" hidden>Permisos</button>
     <button data-v="tpl">Plantilla de actividades</button>
   </nav>
   <div class="spacer"></div>
@@ -126,6 +127,20 @@
     <p class="muted">Crea los roles que necesites (QA Funcional, QA Automatizador, Líder, etc.).</p>
     <form id="roleForm" class="inline"><input name="role" placeholder="Nuevo rol" required><button class="primary" data-edit>Crear rol</button></form>
     <table id="roleTbl"></table>
+  </div>
+</section>
+
+<section id="v-perm" class="view" hidden>
+  <div class="card">
+    <h2>Permisos de acceso</h2>
+    <p class="muted">Solo el administrador ve esta pantalla. <b>Administrador</b>: edita todo y gestiona permisos. <b>Editor</b>: crea y modifica requerimientos. <b>Solo lectura</b>: únicamente ve. Quien no esté en la lista no puede ver nada.</p>
+    <form id="permForm" class="inline">
+      <input name="email" type="email" placeholder="correo@empresa.com" required>
+      <select name="role"><option value="viewer">Solo lectura</option><option value="editor">Editor</option><option value="admin">Administrador</option></select>
+      <button class="primary">Dar acceso</button>
+    </form>
+    <p class="muted" id="permHint">Después de darle acceso, la persona debe entrar a la página y pulsar «Crear cuenta» con ese mismo correo (o créala tú en Supabase → Authentication → Users).</p>
+    <div class="tablewrap"><table id="permTbl"></table></div>
   </div>
 </section>
 

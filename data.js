@@ -97,7 +97,7 @@
     const { data: prof, error } = await sb.from("profiles").select("*").eq("email", userEmail).maybeSingle();
     if (error) throw error;
     if (!prof) return { denied: true, user: userEmail };
-    canEdit = prof.role === "editor"; profile = prof;
+    canEdit = prof.role === "editor" || prof.role === "admin"; profile = prof;
     let store = await fetchState();
     if (!store) { store = canEdit ? seedOrEmpty() : emptyStore(); if (canEdit) { pending = store; await pushNow(); } }
     setInterval(async () => {                       // refresco cada 30 s si no hay cambios por guardar
@@ -114,6 +114,11 @@
     pending = s; clearTimeout(timer); timer = setTimeout(pushNow, 400);
   };
   D.getProfile = () => profile;
+  D.isAdmin = () => remote && profile.role === "admin";
+  D.myEmail = () => userEmail;
+  D.setRole = async (email, role) => { const { data, error } = await sb.from("profiles").update({ role }).eq("email", email).select("email"); if (error) throw error; if (!data.length) throw new Error("No se pudo cambiar (sin permiso)"); };
+  D.addUser = async (email, role) => { const { error } = await sb.from("profiles").insert({ email, role }); if (error) throw error; };
+  D.removeUser = async email => { const { data, error } = await sb.from("profiles").delete().eq("email", email).select("email"); if (error) throw error; if (!data.length) throw new Error("No se pudo quitar (sin permiso)"); };
   D.saveProfile = async p => {
     const clean = {}; PF.forEach(k => (clean[k] = (p[k] ?? "").toString().trim() || null));
     if (!remote) { profile = { ...profile, ...clean }; try { localStorage.setItem("qa-profile", JSON.stringify(profile)); } catch {} return; }
