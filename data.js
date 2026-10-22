@@ -19,15 +19,15 @@
     ]
   });
   const defaultRoles = () => ["QA Funcional", "QA Automatizador"];
-  const emptyStore = () => ({ members: [], roles: defaultRoles(), templates: defaultTemplates(), reqs: [] });
-  const normalize = o => { o.roles ||= defaultRoles(); o.templates ||= defaultTemplates(); o.members ||= []; o.reqs ||= []; o.members.forEach(m => (m.role ||= "")); return o; };
+  const emptyStore = () => ({ clients: [], members: [], roles: defaultRoles(), templates: defaultTemplates(), reqs: [] });
+  const normalize = o => { o.roles ||= defaultRoles(); o.templates ||= defaultTemplates(); o.members ||= []; o.reqs ||= []; o.clients ||= []; if (!o.clients.length) o.clients.push({ id: uid(), name: "General" }); o.reqs.forEach(r => { if (!o.clients.some(c => c.id === r.clientId)) r.clientId = o.clients[0].id; }); o.members.forEach(m => { m.roles ||= m.role ? [m.role] : []; delete m.role; }); return o; };
 
   function seed() {
     const t = iso(new Date());
     const m = [
-      { id: uid(), name: "Ana Torres", email: "ana@empresa.com", role: "QA Funcional" },
-      { id: uid(), name: "Luis Rojas", email: "luis@empresa.com", role: "QA Automatizador" },
-      { id: uid(), name: "Marta Díaz", email: "marta@empresa.com", role: "QA Funcional" }
+      { id: uid(), name: "Ana Torres", email: "ana@empresa.com", roles: ["QA Funcional"] },
+      { id: uid(), name: "Luis Rojas", email: "luis@empresa.com", roles: ["QA Automatizador", "QA Funcional"] },
+      { id: uid(), name: "Marta Díaz", email: "marta@empresa.com", roles: ["QA Funcional"] }
     ];
     const tpl = defaultTemplates();
     let s = addDays(t, -9);
@@ -35,14 +35,15 @@
       const x = { id: uid(), name: a.name, start: s, end: addDays(s, a.days - 1), percent: i < 3 ? 100 : i === 3 ? 50 : 0, assigneeId: m[0].id, blocked: false };
       s = addDays(x.end, 1); return x;
     });
+    const cl = [{ id: uid(), name: "IPS" }, { id: uid(), name: "Hites" }, { id: uid(), name: "PDI" }];
     return {
-      members: m, roles: defaultRoles(), templates: tpl,
+      clients: cl, members: m, roles: defaultRoles(), templates: tpl,
       reqs: [
-        { id: uid(), code: "R1903", title: "Aranda - SOLFON", type: "trad", assigneeId: m[0].id, status: "En curso", percent: 0, start: acts[0].start, end: acts[acts.length - 1].end, acts,
+        { id: uid(), clientId: cl[0].id, code: "R1903", title: "Aranda - SOLFON", type: "trad", assigneeId: m[0].id, status: "En curso", percent: 0, start: acts[0].start, end: acts[acts.length - 1].end, acts,
           comments: [{ id: uid(), at: new Date().toISOString(), by: "Ana Torres", text: "Casos aprobados por el analista. Iniciando ciclo 1." }] },
-        { id: uid(), code: "R2044", title: "Ajuste de reporte de saldos", type: "express", assigneeId: m[1].id, status: "En curso", percent: 60, start: addDays(t, -1), end: addDays(t, 1), acts: [],
+        { id: uid(), clientId: cl[1].id, code: "R2044", title: "Ajuste de reporte de saldos", type: "express", assigneeId: m[1].id, status: "En curso", percent: 60, start: addDays(t, -1), end: addDays(t, 1), acts: [],
           comments: [{ id: uid(), at: new Date().toISOString(), by: "Luis Rojas", text: "Probado 60%, falta validar con datos de producción." }] },
-        { id: uid(), code: "R2051", title: "Validación campo teléfono", type: "express", assigneeId: m[2].id, status: "Pendiente", percent: 0, start: addDays(t, 2), end: addDays(t, 2), acts: [], comments: [] }
+        { id: uid(), clientId: cl[2].id, code: "R2051", title: "Validación campo teléfono", type: "express", assigneeId: m[2].id, status: "Pendiente", percent: 0, start: addDays(t, 2), end: addDays(t, 2), acts: [], comments: [] }
       ]
     };
   }

@@ -13,10 +13,12 @@
 <body>
 <header class="top">
   <div class="brandbar"><img src="logo-sonda.png" alt="Sonda" class="logo"><h1>Dashboard QA</h1></div>
+  <label class="clientLbl">Cliente <select id="clientSel" aria-label="Cliente activo"></select></label>
   <nav class="tabs" id="tabs">
     <button data-v="dash" class="on">Dashboard</button>
     <button data-v="gantt">Gantt</button>
     <button data-v="team">Equipo</button>
+    <button data-v="clients">Clientes</button>
     <button data-v="tpl">Plantilla de actividades</button>
   </nav>
   <div class="spacer"></div>
@@ -105,7 +107,7 @@
     <form id="memberForm" class="inline">
       <input name="name" placeholder="Nombre" required>
       <input name="email" type="email" placeholder="Correo (opcional)">
-      <select name="role" id="memberRole"></select>
+      <div id="memberRole"></div>
       <button class="primary" data-edit>Agregar</button>
     </form>
     <table id="memberTbl"></table>
@@ -115,6 +117,15 @@
     <p class="muted">Crea los roles que necesites (QA Funcional, QA Automatizador, Líder, etc.).</p>
     <form id="roleForm" class="inline"><input name="role" placeholder="Nuevo rol" required><button class="primary" data-edit>Crear rol</button></form>
     <table id="roleTbl"></table>
+  </div>
+</section>
+
+<section id="v-clients" class="view" hidden>
+  <div class="card">
+    <h2>Clientes</h2>
+    <p class="muted">Cada cliente tiene sus propios requerimientos. El equipo y las plantillas se comparten entre clientes. Cambia de cliente con el selector del encabezado.</p>
+    <form id="clientForm" class="inline"><input name="name" placeholder="Nuevo cliente (ej: Hites)" required><button class="primary" data-edit>Agregar cliente</button></form>
+    <table id="clientTbl"></table>
   </div>
 </section>
 
@@ -133,6 +144,7 @@
     <header><h2 id="rTitle">Requerimiento</h2><button type="button" id="rClose">✕</button></header>
     <div class="rgrid">
       <div class="col">
+        <label>Cliente <select name="clientId"></select></label>
         <div class="row2"><label>Código <input name="code" required placeholder="R1903"></label>
           <label>Tipo <select name="type"><option value="trad">QA Tradicional (Gantt)</option><option value="express">QA Express (rápido)</option></select></label></div>
         <label>Título <input name="title" required></label>

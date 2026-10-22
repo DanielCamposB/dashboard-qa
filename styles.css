@@ -195,3 +195,31 @@ button.danger:hover{background:color-mix(in srgb,var(--s-atr) 14%,transparent);b
 .kpi{border-radius:12px}.kpi b{font-family:"Kumbh Sans",sans-serif}
 .avatar{background:var(--acc);color:var(--acc-ink)}
 @media(max-width:760px){.brandbar h1{font-size:16px}.tabs{order:5;width:100%;margin:0;overflow:auto}.actionbar{padding:12px 16px 0}button.big{width:100%;justify-content:center}}
+
+.rolepick{position:relative;display:inline-block;min-width:170px}
+.rolepick summary{list-style:none;cursor:pointer;padding:6px 28px 6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);font-size:13px;position:relative}
+.rolepick summary::-webkit-details-marker{display:none}
+.rolepick summary::after{content:"▾";position:absolute;right:10px;top:6px;color:var(--mut)}
+.rolepick[open] summary{border-color:var(--acc)}
+.rpmenu{position:absolute;z-index:30;top:calc(100% + 4px);left:0;min-width:100%;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:6px;box-shadow:0 10px 26px rgba(0,0,0,.35)}
+.rpmenu label{display:flex;gap:8px;align-items:center;padding:6px 8px;border-radius:6px;cursor:pointer;white-space:nowrap}
+.rpmenu label:hover{background:color-mix(in srgb,var(--acc) 12%,transparent)}
+.rpmenu input{width:auto;margin:0}
+
+.clientLbl{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:.04em;font-weight:600}
+#clientSel{min-width:190px;padding:8px 12px;font-size:14px;font-weight:700;text-transform:none;letter-spacing:0;color:var(--ink);border:1.5px solid var(--acc);border-radius:10px}
+#clientTbl input{width:100%;max-width:320px}
+
+/* ---- Campos más grandes y que crecen con el texto ---- */
+input,select,textarea{font-size:15px}
+input:not([type=checkbox]):not([type=radio]),select,textarea{padding:9px 12px;min-height:40px}
+textarea.grow{width:100%;min-height:40px;resize:vertical;overflow:hidden;line-height:1.35;font-family:inherit;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:9px 12px}
+#tplTbl{table-layout:fixed}#tplTbl th:nth-child(1){width:46px}#tplTbl th:nth-child(3){width:150px}#tplTbl th:nth-child(4){width:130px}
+#tplTbl input[type=number]{width:100%!important}
+#actTbl{table-layout:fixed;min-width:760px}
+#actTbl th:nth-child(1){width:30%}#actTbl th:nth-child(2){width:17%}#actTbl th:nth-child(3),#actTbl th:nth-child(4){width:15%}#actTbl th:nth-child(5){width:8%}#actTbl th:nth-child(6){width:6%}#actTbl th:nth-child(7){width:6%}
+#actTbl input,#actTbl select,#actTbl textarea{font-size:13px;padding:6px 8px;min-height:34px}
+#actTbl input[data-f=name]{min-width:0}
+.rgrid .col:first-child{overflow-x:auto}
+dialog{width:min(1240px,97vw)}
+.rgrid{grid-template-columns:1.9fr 1fr}

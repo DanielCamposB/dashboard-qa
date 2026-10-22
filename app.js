@@ -76,7 +76,11 @@
   if (boot.needLogin || boot.denied) { showLogin(boot); return; }
   let store = boot.store, readOnly = boot.forceRead ?? (lsGet("qa-mode", "edit") === "read"), pxDay = +lsGet("qa-zoom", 14), draft = null, isNew = false;
   const save = () => D.save(store);
-  const memberRole = id => store.members.find(m => m.id === id)?.role || "";
+  let clientId = lsGet("qa-client", "all");
+  const clientName = id => store.clients.find(c => c.id === id)?.name || "—";
+  const scoped = () => (clientId === "all" ? store.reqs : store.reqs.filter(r => r.clientId === clientId));
+  const memberRoles = id => store.members.find(m => m.id === id)?.roles || [];
+  const pick = (attr, sel, off) => `<details class="rolepick"><summary>${sel.length ? esc(sel.join(", ")) : "Sin rol"}</summary><div class="rpmenu">${store.roles.length ? store.roles.map(r => `<label><input type="checkbox" ${attr} value="${esc(r)}"${sel.includes(r) ? " checked" : ""}${off ? " disabled" : ""}> ${esc(r)}</label>`).join("") : '<small class="muted">Crea un rol primero</small>'}</div></details>`;
   const mname = id => store.members.find(m => m.id === id)?.name || "—";
 
   // ---------- cálculos ----------
@@ -93,7 +97,7 @@
   const lvlTxt = d => d >= 14 ? Math.floor(d / 7) + " semanas" : d >= 7 ? Math.floor(d / 7) + " semana" + (d >= 14 ? "s" : "") + (d % 7 ? " y " + (d % 7) + " d" : "") : d + (d === 1 ? " día" : " días");
   function alertsList() {
     const out = [];
-    for (const r of store.reqs) {
+    for (const r of scoped()) {
       if (r.status === "Completado") continue;
       const e = span(r)[1];
       let worst = { d: daysLate(e), what: "Requerimiento" };
@@ -128,11 +132,11 @@
   // ---------- Dashboard ----------
   function visible() {
     const t = $("#fType").value, ro = $("#fRole").value, a = $("#fAssignee").value, s = $("#fStatus").value, q = $("#fText").value.toLowerCase();
-    return store.reqs.filter(r => (!t || r.type === t) && (!a || r.assigneeId === a) && (!ro || memberRole(r.assigneeId) === ro) && (!s || r.status === s) &&
+    return scoped().filter(r => (!t || r.type === t) && (!a || r.assigneeId === a) && (!ro || memberRoles(r.assigneeId).includes(ro)) && (!s || r.status === s) &&
       (!q || (r.code + " " + r.title + " " + r.comments.map(c => c.text).join(" ")).toLowerCase().includes(q)));
   }
   function renderDash() {
-    const all = store.reqs, c = f => all.filter(f).length;
+    const all = scoped(), c = f => all.filter(f).length;
     const al = alertsList();
     $("#alerts").innerHTML = al.length ? `<details open><summary><b>${al.length} alerta${al.length > 1 ? "s" : ""} de atraso</b></summary>` +
       al.map(a => `<div class="al al${lvl(a.d)}" data-id="${a.r.id}"><b>${lvlTxt(a.d)} de atraso</b> · ${esc(a.r.code)} ${esc(a.r.title)} · <span>${esc(a.what)}</span> · ${esc(mname(a.r.assigneeId))}</div>`).join("") + "</details>" : "";
@@ -147,11 +151,11 @@
     $("#fRole").innerHTML = `<option value="">Todos los roles</option>` + store.roles.map(r => `<option>${esc(r)}</option>`).join("");
     $("#fRole").value = kr;
     const rows = visible().sort((a, b) => span(a)[1].localeCompare(span(b)[1]));
-    $("#tbl").innerHTML = `<thead><tr><th>Código</th><th>Requerimiento</th><th>Tipo</th><th>Responsable</th><th>Estado</th><th>Avance</th><th>Inicio</th><th>Fin</th><th>Último seguimiento</th></tr></thead><tbody>` +
+    $("#tbl").innerHTML = `<thead><tr>${clientId === "all" ? "<th>Cliente</th>" : ""}<th>Código</th><th>Requerimiento</th><th>Tipo</th><th>Responsable</th><th>Estado</th><th>Avance</th><th>Inicio</th><th>Fin</th><th>Último seguimiento</th></tr></thead><tbody>` +
       (rows.map(r => {
         const p = progress(r), [s, e] = span(r), lc = lastComment(r);
-        return `<tr data-id="${r.id}"><td><b>${esc(r.code)}</b></td><td>${esc(r.title)}</td>
-          <td><span class="pill ${r.type}">${r.type === "trad" ? "Tradicional" : "Express"}</span></td><td>${esc(mname(r.assigneeId))}<br><small class="muted">${esc(memberRole(r.assigneeId))}</small></td>
+        return `<tr data-id="${r.id}">${clientId === "all" ? `<td>${esc(clientName(r.clientId))}</td>` : ""}<td><b>${esc(r.code)}</b></td><td>${esc(r.title)}</td>
+          <td><span class="pill ${r.type}">${r.type === "trad" ? "Tradicional" : "Express"}</span></td><td>${esc(mname(r.assigneeId))}<br><small class="muted">${esc(memberRoles(r.assigneeId).join(", "))}</small></td>
           <td><span class="st st-${r.status.replace(" ", "")}">${r.status}</span>${late(r) ? ` <span class="st al${lvl(daysLate(span(r)[1]))}">Atrasado ${lvlTxt(daysLate(span(r)[1]))}</span>` : ""}</td>
           <td><div class="pbar"><i style="width:${p}%"></i><span>${p}%</span></div></td><td>${s}</td><td>${e}</td>
           <td class="lc">${lc ? `<small>${lc.at.slice(0, 10)} · ${esc(lc.by)}</small><br>${esc(lc.text.slice(0, 90))}` : '<small class="muted">Sin comentarios</small>'} <small class="muted">(${r.comments.length})</small></td></tr>`;
@@ -223,16 +227,16 @@
   // ---------- Equipo ----------
   function renderTeam() {
     $("#memberTbl").innerHTML = `<thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Requerimientos activos</th><th></th></tr></thead><tbody>` +
-      store.members.map(m => `<tr><td>${esc(m.name)}</td><td>${esc(m.email)}</td><td><select data-role="${m.id}"${readOnly ? " disabled" : ""}><option value="">—</option>${store.roles.map(r => `<option${r === m.role ? " selected" : ""}>${esc(r)}</option>`).join("")}</select></td><td>${store.reqs.filter(r => r.assigneeId === m.id && r.status !== "Completado").length}</td>
+      store.members.map(m => `<tr><td>${esc(m.name)}</td><td>${esc(m.email)}</td><td>${pick(`data-mrole="${m.id}"`, m.roles, readOnly)}</td><td>${store.reqs.filter(r => r.assigneeId === m.id && r.status !== "Completado").length}</td>
         <td>${readOnly ? "" : `<button data-rm="${m.id}" class="danger">Quitar</button>`}</td></tr>`).join("") + `</tbody>`;
-    $("#memberTbl").querySelectorAll("[data-role]").forEach(sel => (sel.onchange = () => { store.members.find(m => m.id === sel.dataset.role).role = sel.value; save(); render(); }));
-    $("#memberRole").innerHTML = `<option value="">Rol…</option>` + store.roles.map(r => `<option>${esc(r)}</option>`).join("");
+    $("#memberTbl").querySelectorAll("[data-mrole]").forEach(cb => (cb.onchange = () => { const id = cb.dataset.mrole; store.members.find(m => m.id === id).roles = [...$("#memberTbl").querySelectorAll(`[data-mrole="${id}"]:checked`)].map(x => x.value); save(); render(); const d = document.querySelector(`[data-mrole="${id}"]`)?.closest("details"); if (d) d.open = true; }));
+    { const keep = [...document.querySelectorAll("#memberRole input:checked")].map(x => x.value); $("#memberRole").innerHTML = pick('data-newrole', keep, readOnly).replace("Sin rol", "Roles…"); }
     $("#roleTbl").innerHTML = `<thead><tr><th>Rol</th><th>Integrantes</th><th></th></tr></thead><tbody>` + store.roles.map((r, i) =>
-      `<tr><td>${esc(r)}</td><td>${store.members.filter(m => m.role === r).map(m => esc(m.name)).join(", ") || '<span class="muted">—</span>'}</td><td>${readOnly ? "" : `<button data-rrm="${i}" class="danger">Eliminar</button>`}</td></tr>`).join("") + `</tbody>`;
+      `<tr><td>${esc(r)}</td><td>${store.members.filter(m => m.roles.includes(r)).map(m => esc(m.name)).join(", ") || '<span class="muted">—</span>'}</td><td>${readOnly ? "" : `<button data-rrm="${i}" class="danger">Eliminar</button>`}</td></tr>`).join("") + `</tbody>`;
     $("#roleTbl").querySelectorAll("[data-rrm]").forEach(b => (b.onclick = () => {
       const r = store.roles[+b.dataset.rrm];
       if (!confirm(`¿Eliminar el rol "${r}"? Sus integrantes quedarán sin rol.`)) return;
-      store.roles.splice(+b.dataset.rrm, 1); store.members.forEach(m => { if (m.role === r) m.role = ""; }); save(); render();
+      store.roles.splice(+b.dataset.rrm, 1); store.members.forEach(m => { m.roles = m.roles.filter(x => x !== r); }); save(); render();
     }));
     $("#memberTbl").querySelectorAll("[data-rm]").forEach(b => (b.onclick = () => {
       const m = store.members.find(x => x.id === b.dataset.rm);
@@ -244,15 +248,22 @@
   }
 
   // ---------- Plantilla ----------
+  function autosize(root) {                 // las cajas de texto crecen según lo escrito
+    root.querySelectorAll("textarea.grow").forEach(t => {
+      const fit = () => { t.style.height = "auto"; t.style.height = t.scrollHeight + 2 + "px"; };
+      t.oninput = fit; fit();
+    });
+  }
   function renderTpl() {
     const t = store.templates.trad;
     $("#tplTbl").innerHTML = `<thead><tr><th>#</th><th>Actividad</th><th>Duración (días)</th><th></th></tr></thead><tbody>` +
-      t.map((a, i) => `<tr><td>${i + 1}</td><td><input data-i="${i}" data-f="name" value="${esc(a.name)}"></td><td><input type="number" min="1" data-i="${i}" data-f="days" value="${a.days}" style="width:80px"></td>
+      t.map((a, i) => `<tr><td>${i + 1}</td><td><textarea class="grow" rows="1" data-i="${i}" data-f="name">${esc(a.name)}</textarea></td><td><input type="number" min="1" data-i="${i}" data-f="days" value="${a.days}" style="width:80px"></td>
         <td><button data-up="${i}">↑</button> <button data-rm="${i}" class="danger">✕</button></td></tr>`).join("") + `</tbody>`;
-    $("#tplTbl").querySelectorAll("input").forEach(i => (i.onchange = () => { t[+i.dataset.i][i.dataset.f] = i.dataset.f === "days" ? Math.max(1, +i.value) : i.value; save(); }));
+    $("#tplTbl").querySelectorAll("input,textarea").forEach(i => (i.onchange = () => { t[+i.dataset.i][i.dataset.f] = i.dataset.f === "days" ? Math.max(1, +i.value) : i.value; save(); }));
     $("#tplTbl").querySelectorAll("[data-rm]").forEach(b => (b.onclick = () => { t.splice(+b.dataset.rm, 1); save(); renderTpl(); }));
     $("#tplTbl").querySelectorAll("[data-up]").forEach(b => (b.onclick = () => { const i = +b.dataset.up; if (i) { [t[i - 1], t[i]] = [t[i], t[i - 1]]; save(); renderTpl(); } }));
-    $("#tplTbl").querySelectorAll("input").forEach(i => (i.disabled = readOnly));
+    $("#tplTbl").querySelectorAll("input,textarea").forEach(i => (i.disabled = readOnly));
+    autosize($("#tplTbl"));
     document.querySelectorAll("#tplTbl button").forEach(b => (b.hidden = readOnly));
   }
 
@@ -264,18 +275,19 @@
   function openReq(id) {
     isNew = !id;
     draft = id ? JSON.parse(JSON.stringify(store.reqs.find(r => r.id === id)))
-      : { id: uid(), code: "", title: "", type: "trad", assigneeId: store.members[0]?.id || "", status: "Pendiente", percent: 0, start: today, end: today, acts: [], comments: [] };
+      : { id: uid(), clientId: clientId !== "all" ? clientId : (store.clients[0]?.id || ""), code: "", title: "", type: "trad", assigneeId: store.members[0]?.id || "", status: "Pendiente", percent: 0, start: today, end: today, acts: [], comments: [] };
     if (isNew) draft.acts = fromTemplate(today);
     const f = $("#rform");
     $("#rTitle").textContent = isNew ? "Nuevo requerimiento" : `${draft.code} · ${draft.title}`;
-    f.assigneeId.innerHTML = `<option value="">— Sin asignar —</option>` + store.members.map(m => `<option value="${m.id}">${esc(m.name)}${m.role ? " · " + esc(m.role) : ""}</option>`).join("");
-    for (const k of ["code", "title", "type", "assigneeId", "status", "percent", "start", "end"]) f[k].value = draft[k] ?? "";
+    f.clientId.innerHTML = store.clients.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
+    f.assigneeId.innerHTML = `<option value="">— Sin asignar —</option>` + store.members.map(m => `<option value="${m.id}">${esc(m.name)}${m.roles.length ? " · " + esc(m.roles.join(", ")) : ""}</option>`).join("");
+    for (const k of ["clientId", "code", "title", "type", "assigneeId", "status", "percent", "start", "end"]) f[k].value = draft[k] ?? "";
     syncType(); renderActs(); renderThread();
     $("#newComment").value = "";
     f.querySelectorAll("input,select,textarea").forEach(e => { if (e.id !== "newComment") e.disabled = readOnly; });
     $("#newComment").disabled = readOnly; $("#btnComment").hidden = readOnly; $("#rSave").hidden = readOnly; $("#rDelete").hidden = readOnly || isNew;
     f.querySelectorAll("[data-edit]").forEach(e => { if (e.id !== "rSave" && e.id !== "rDelete") e.hidden = readOnly; });
-    $("#dlg").showModal();
+    $("#dlg").showModal(); autosize($("#actTbl"));
   }
   function syncType() {
     const trad = $("#rform").type.value === "trad";
@@ -283,16 +295,17 @@
   }
   function readForm() {
     const f = $("#rform");
-    for (const k of ["code", "title", "type", "assigneeId", "status", "start", "end"]) draft[k] = f[k].value;
+    for (const k of ["clientId", "code", "title", "type", "assigneeId", "status", "start", "end"]) draft[k] = f[k].value;
     draft.percent = Math.min(100, Math.max(0, +f.percent.value || 0));
   }
   function renderActs() {
     const opts = sel => `<option value="">—</option>` + store.members.map(m => `<option value="${m.id}"${m.id === sel ? " selected" : ""}>${esc(m.name)}</option>`).join("");
     $("#actTbl").innerHTML = `<thead><tr><th>Actividad</th><th>Resp.</th><th>Inicio</th><th>Fin</th><th>%</th><th>Bloq.</th><th></th></tr></thead><tbody>` +
-      draft.acts.map((a, i) => `<tr><td><input data-i="${i}" data-f="name" value="${esc(a.name)}"></td><td><select data-i="${i}" data-f="assigneeId">${opts(a.assigneeId)}</select></td>
+      draft.acts.map((a, i) => `<tr><td><textarea class="grow" rows="1" data-i="${i}" data-f="name">${esc(a.name)}</textarea></td><td><select data-i="${i}" data-f="assigneeId">${opts(a.assigneeId)}</select></td>
         <td><input type="date" data-i="${i}" data-f="start" value="${a.start}"></td><td><input type="date" data-i="${i}" data-f="end" value="${a.end}"></td>
         <td><select data-i="${i}" data-f="percent">${[0, 25, 50, 75, 100].map(p => `<option${p === a.percent ? " selected" : ""}>${p}</option>`).join("")}</select></td>
         <td><input type="checkbox" data-i="${i}" data-f="blocked"${a.blocked ? " checked" : ""}></td><td>${readOnly ? "" : `<button type="button" data-rm="${i}" class="danger">✕</button>`}</td></tr>`).join("") + `</tbody>`;
+    autosize($("#actTbl"));
     $("#actTbl").querySelectorAll("[data-f]").forEach(el => {
       el.disabled = readOnly;
       el.onchange = () => { const a = draft.acts[+el.dataset.i], f = el.dataset.f; a[f] = f === "blocked" ? el.checked : f === "percent" ? +el.value : el.value; };
@@ -326,15 +339,33 @@
   }
 
   // ---------- global ----------
+  function renderClientSel() {
+    if (clientId !== "all" && !store.clients.some(c => c.id === clientId)) clientId = "all";
+    const sel = $("#clientSel");
+    sel.innerHTML = `<option value="all">Todos los clientes (${store.reqs.length})</option>` + store.clients.map(c => `<option value="${c.id}">${esc(c.name)} (${store.reqs.filter(r => r.clientId === c.id).length})</option>`).join("");
+    sel.value = clientId;
+  }
+  function renderClients() {
+    $("#clientTbl").innerHTML = `<thead><tr><th>Cliente</th><th>Requerimientos</th><th></th></tr></thead><tbody>` + store.clients.map(c => `<tr><td><input data-cn="${c.id}" value="${esc(c.name)}"${readOnly ? " disabled" : ""}></td><td>${store.reqs.filter(r => r.clientId === c.id).length}</td><td>${readOnly ? "" : `<button data-cdel="${c.id}" class="danger">Eliminar</button>`}</td></tr>`).join("") + "</tbody>";
+    $("#clientTbl").querySelectorAll("[data-cn]").forEach(i => (i.onchange = () => { const v = i.value.trim(); if (!v) { i.value = clientName(i.dataset.cn); return; } store.clients.find(c => c.id === i.dataset.cn).name = v; save(); renderClientSel(); }));
+    $("#clientTbl").querySelectorAll("[data-cdel]").forEach(b => (b.onclick = () => {
+      const c = store.clients.find(x => x.id === b.dataset.cdel);
+      if (store.reqs.some(r => r.clientId === c.id)) return say(`No se puede eliminar "${c.name}": tiene requerimientos. Elimínalos o muévelos a otro cliente primero.`, 1);
+      if (!confirm(`¿Eliminar el cliente "${c.name}"?`)) return;
+      store.clients = store.clients.filter(x => x !== c); save(); render();
+    }));
+  }
   function render() {
     if (!$("#v-dash").hidden) renderDash();
     if (!$("#v-gantt").hidden) renderGantt();
     if (!$("#v-team").hidden) renderTeam();
+    renderClientSel();
+    if (!$("#v-clients").hidden) renderClients();
     if (!$("#v-tpl").hidden) renderTpl();
   }
   function csv() {
-    const rows = [["Código", "Título", "Tipo", "Responsable", "Estado", "Avance %", "Inicio", "Fin", "Comentarios"]].concat(visible().map(r => {
-      const [s, e] = span(r); return [r.code, r.title, r.type, mname(r.assigneeId), r.status, progress(r), s, e, r.comments.map(c => `${c.at.slice(0, 10)} ${c.by}: ${c.text}`).join(" | ")];
+    const rows = [["Cliente", "Código", "Título", "Tipo", "Responsable", "Estado", "Avance %", "Inicio", "Fin", "Comentarios"]].concat(visible().map(r => {
+      const [s, e] = span(r); return [clientName(r.clientId), r.code, r.title, r.type, mname(r.assigneeId), r.status, progress(r), s, e, r.comments.map(c => `${c.at.slice(0, 10)} ${c.by}: ${c.text}`).join(" | ")];
     }));
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob(["﻿" + rows.map(r => r.map(c => `"${String(c ?? "").replace(/"/g, '""')}"`).join(",")).join("\r\n")], { type: "text/csv" }));
@@ -353,8 +384,11 @@
   };
   ["fType", "fRole", "fAssignee", "fStatus"].forEach(i => ($("#" + i).onchange = render)); $("#fText").oninput = render;
   document.querySelectorAll("#zoom button").forEach(b => (b.onclick = () => { pxDay = +b.dataset.z; lsSet("qa-zoom", pxDay); renderGantt(); }));
-  $("#memberForm").onsubmit = e => { e.preventDefault(); if (readOnly) return; const f = e.target; store.members.push({ id: uid(), name: f.name.value.trim(), email: f.email.value.trim(), role: f.role.value }); f.reset(); save(); render(); };
+  $("#memberForm").onsubmit = e => { e.preventDefault(); if (readOnly) return; const f = e.target; store.members.push({ id: uid(), name: f.name.value.trim(), email: f.email.value.trim(), roles: [...document.querySelectorAll("#memberRole input:checked")].map(x => x.value) }); f.reset(); save(); render(); };
+  document.addEventListener("click", e => document.querySelectorAll(".rolepick[open]").forEach(d => { if (!d.contains(e.target)) d.open = false; }));
   $("#roleForm").onsubmit = e => { e.preventDefault(); if (readOnly) return; const v = e.target.role.value.trim(); if (store.roles.includes(v)) return say("Ese rol ya existe.", 1); store.roles.push(v); e.target.reset(); save(); render(); };
+  $("#clientSel").onchange = e => { clientId = e.target.value; lsSet("qa-client", clientId); render(); };
+  $("#clientForm").onsubmit = e => { e.preventDefault(); if (readOnly) return; const v = e.target.name.value.trim(); if (!v) return; if (store.clients.some(c => c.name.toLowerCase() === v.toLowerCase())) return say("Ese cliente ya existe.", 1); const c = { id: uid(), name: v }; store.clients.push(c); e.target.reset(); save(); clientId = c.id; lsSet("qa-client", clientId); render(); say("Cliente creado y seleccionado ✓"); };
   $("#btnTplAdd").onclick = () => { store.templates.trad.push({ name: "Nueva actividad", days: 1 }); save(); renderTpl(); };
   $("#btnTplReset").onclick = () => { if (confirm("¿Restaurar la plantilla por defecto?")) { store.templates = D.defaultTemplates(); save(); renderTpl(); } };
   $("#rform").type.onchange = () => { readForm(); syncType(); if (draft.type === "trad" && !draft.acts.length) { draft.acts = fromTemplate(draft.start || today); renderActs(); } };
