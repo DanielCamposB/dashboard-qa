@@ -290,3 +290,9 @@ dialog{width:min(1240px,97vw)}
   .thread{max-height:220px}
 }
 @media(max-width:380px){.kpis{grid-template-columns:repeat(2,1fr)}.brandbar h1{font-size:15px}}
+
+.badge.admin{background:linear-gradient(90deg,#00e5ff,#1f5df5);color:#00121a;font-weight:800;letter-spacing:.02em}
+.avatarBtn.isAdmin .avatar{box-shadow:0 0 0 2px var(--card),0 0 0 4px #00e5ff}
+.rform header .badge{flex:none}
+.usermenu{margin-left:auto}
+@media(max-width:760px){.usermenu{margin-left:0}}

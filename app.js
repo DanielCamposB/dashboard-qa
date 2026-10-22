@@ -123,7 +123,8 @@
     $("#uname").textContent = p.nombres ? p.nombres.split(" ")[0] : nm; $("#uname2").textContent = nm; $("#uemail").textContent = em;
     $("#ucargo").textContent = [p.cargo, p.vertical].filter(Boolean).join(" · "); $("#ucargo").hidden = !$("#ucargo").textContent;
     const roleTxt = D.isAdmin() ? "Administrador" : readOnly ? "Solo lectura" : "Editor";
-    $("#urole").textContent = roleTxt; $("#urole").className = "badge " + (readOnly ? "read" : "edit");
+    $("#urole").textContent = D.isAdmin() ? "★ Administrador" : roleTxt; $("#urole").className = "badge " + (D.isAdmin() ? "admin" : readOnly ? "read" : "edit");
+    $("#avatarBtn").classList.toggle("isAdmin", D.isAdmin()); $("#avatar").title = D.isAdmin() ? "Administrador" : "";
     $("#tabPerm").hidden = !D.isAdmin();
     if (fullName()) lsSet("qa-author", fullName()); else if (em && !lsGet("qa-author", "")) lsSet("qa-author", em.split("@")[0]);
   }
@@ -140,7 +141,7 @@
     const f = $("#pform"), p = D.getProfile();
     f.email.value = boot.user || "(modo local)";
     ["nombres", "apellido_paterno", "apellido_materno", "cargo", "vertical", "cumpleanos", "telefono"].forEach(k => (f[k].value = p[k] ?? ""));
-    $("#pErr").hidden = true;
+    $("#pErr").hidden = true; $("#pAdminBadge").hidden = !D.isAdmin();
     $("#pHint").textContent = first ? "Bienvenido/a. Completa tu perfil para que el equipo te identifique. Puedes editarlo después desde «Mi perfil»." : "Esta información identifica a cada integrante del equipo.";
     $("#pdlg").showModal();
   }
