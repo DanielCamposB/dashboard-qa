@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dashboard QA</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Kumbh+Sans:wght@400;600;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="top">
+  <h1>Dashboard QA</h1>
+  <nav class="tabs" id="tabs">
+    <button data-v="dash" class="on">Dashboard</button>
+    <button data-v="gantt">Gantt</button>
+    <button data-v="team">Equipo</button>
+    <button data-v="tpl">Plantilla de actividades</button>
+  </nav>
+  <div class="spacer"></div>
+  <div class="usermenu" id="userMenu" hidden>
+    <button type="button" class="avatarBtn" id="avatarBtn" aria-haspopup="true" aria-expanded="false">
+      <span class="avatar" id="avatar">?</span>
+      <span class="uname" id="uname"></span>
+      <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 4l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <div class="umenu" id="umenu" hidden>
+      <div class="uhead"><span class="avatar big" id="avatar2">?</span>
+        <div><b id="uname2"></b><small id="uemail"></small><span class="badge" id="urole"></span></div></div>
+      <hr>
+      <button type="button" class="uitem" id="btnLogout"><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Cerrar sesión</button>
+    </div>
+  </div>
+  <label>Modo
+    <select id="mode"><option value="edit">Editor</option><option value="read">Solo lectura</option></select>
+  </label>
+  <button id="btnNew" class="primary">+ Requerimiento</button>
+  <button id="btnExport">Respaldo JSON</button>
+  <button id="btnImport">Importar</button>
+  <input type="file" id="fileImport" accept=".json" hidden>
+</header>
+<div id="msg" class="msg"></div>
+<section id="login" class="login-wrap" hidden>
+<div class="login-hero">
+  <svg id="heroArt" viewBox="0 0 600 600" preserveAspectRatio="xMidYMid slice" aria-hidden="true"></svg>
+  <div class="hero-txt">
+    <div class="brand"><span class="mark">QA</span> Control de calidad</div>
+    <h1>DASHBOARD <span>QA</span></h1>
+    <p>Seguimiento de requerimientos, actividades y avance del equipo de pruebas, en un solo lugar.</p>
+    <ul><li>Gantt por requerimiento</li><li>Alertas de atraso</li><li>Seguimiento y comentarios</li></ul>
+  </div>
+</div>
+<div class="login-panel">
+  <h2 id="loginTitle">Ingresar al Dashboard QA</h2>
+  <p id="loginInfo" class="muted">Usa tu correo y contraseña.</p>
+  <div id="loginErr" class="loginErr" role="alert" hidden></div>
+  <form id="loginForm" novalidate>
+    <label>Correo <input type="email" name="email" autocomplete="username" placeholder="tu.correo@empresa.com"></label>
+    <label id="pwRow">Contraseña <span class="pw"><input type="password" name="password" autocomplete="current-password"><button type="button" class="eye" title="Mostrar/ocultar" aria-label="Mostrar u ocultar contraseña">👁</button></span></label>
+    <label id="pw2Row" hidden>Repite la contraseña <span class="pw"><input type="password" name="password2" autocomplete="new-password"><button type="button" class="eye" title="Mostrar/ocultar" aria-label="Mostrar u ocultar contraseña">👁</button></span></label>
+    <button class="primary" id="loginBtn">Ingresar</button>
+  </form>
+  <p class="loginLinks"><a href="#" id="lnkSignup">Crear cuenta</a><a href="#" id="lnkReset">Olvidé mi contraseña</a><a href="#" id="lnkBack" hidden>Volver a ingresar</a></p>
+</div>
+</section>
+<div id="app">
+
+<section id="v-dash" class="view">
+  <div id="alerts" class="alerts"></div>
+  <div class="kpis" id="kpis"></div>
+  <div class="toolbar">
+    <select id="fType"><option value="">Express y Tradicional</option><option value="express">QA Express</option><option value="trad">QA Tradicional</option></select>
+    <select id="fRole"><option value="">Todos los roles</option></select>
+    <select id="fAssignee"><option value="">Todo el equipo</option></select>
+    <select id="fStatus"><option value="">Todos los estados</option><option>Pendiente</option><option>En curso</option><option>Bloqueado</option><option>Completado</option></select>
+    <input id="fText" type="search" placeholder="Buscar código, título o comentario…">
+    <div class="spacer"></div>
+    <button id="btnCsv">Exportar CSV</button>
+  </div>
+  <div class="tablewrap"><table id="tbl"></table></div>
+</section>
+
+<section id="v-gantt" class="view" hidden>
+  <div class="toolbar">
+    <span class="muted">Solo requerimientos filtrados en el Dashboard. Arrastra una barra para mover fechas (modo Editor).</span>
+    <div class="spacer"></div>
+    <div class="seg" id="zoom"><button data-z="32">Día</button><button data-z="14" class="on">Semana</button><button data-z="5">Mes</button></div>
+  </div>
+  <main id="gantt" class="gantt"></main>
+</section>
+
+<section id="v-team" class="view" hidden>
+  <div class="card">
+    <h2>Integrantes del equipo</h2>
+    <form id="memberForm" class="inline">
+      <input name="name" placeholder="Nombre" required>
+      <input name="email" type="email" placeholder="Correo (opcional)">
+      <select name="role" id="memberRole"></select>
+      <button class="primary" data-edit>Agregar</button>
+    </form>
+    <table id="memberTbl"></table>
+  </div>
+  <div class="card">
+    <h2>Roles</h2>
+    <p class="muted">Crea los roles que necesites (QA Funcional, QA Automatizador, Líder, etc.).</p>
+    <form id="roleForm" class="inline"><input name="role" placeholder="Nuevo rol" required><button class="primary" data-edit>Crear rol</button></form>
+    <table id="roleTbl"></table>
+  </div>
+</section>
+
+<section id="v-tpl" class="view" hidden>
+  <div class="card">
+    <h2>Actividades base de QA Tradicional</h2>
+    <p class="muted">Se copian a cada requerimiento tradicional nuevo, y allí puedes ajustarlas. Cambiar esto no altera requerimientos ya creados.</p>
+    <table id="tplTbl"></table>
+    <button id="btnTplAdd" data-edit>+ Actividad</button>
+    <button id="btnTplReset" data-edit>Restaurar por defecto</button>
+  </div>
+</section>
+
+<dialog id="dlg">
+  <form method="dialog" id="rform" class="rform">
+    <header><h2 id="rTitle">Requerimiento</h2><button type="button" id="rClose">✕</button></header>
+    <div class="rgrid">
+      <div class="col">
+        <div class="row2"><label>Código <input name="code" required placeholder="R1903"></label>
+          <label>Tipo <select name="type"><option value="trad">QA Tradicional (Gantt)</option><option value="express">QA Express (rápido)</option></select></label></div>
+        <label>Título <input name="title" required></label>
+        <div class="row2"><label>Responsable <select name="assigneeId"></select></label>
+          <label>Estado <select name="status"><option>Pendiente</option><option>En curso</option><option>Bloqueado</option><option>Completado</option></select></label></div>
+        <div class="row2" id="datesRow"><label>Inicio <input type="date" name="start"></label><label>Fin <input type="date" name="end"></label></div>
+        <label id="pctRow">Avance % (express) <input type="number" name="percent" min="0" max="100" step="5"></label>
+        <div id="actsBox">
+          <h3>Actividades <button type="button" id="btnActAdd" data-edit>+</button> <button type="button" id="btnActTpl" data-edit title="Reemplaza por la plantilla">Aplicar plantilla</button></h3>
+          <table id="actTbl"></table>
+        </div>
+      </div>
+      <div class="col">
+        <h3>Seguimiento / comentarios</h3>
+        <div id="thread" class="thread"></div>
+        <div class="newc"><textarea id="newComment" rows="3" placeholder="Escribe un avance, bloqueo o acuerdo…"></textarea>
+          <button type="button" id="btnComment" class="primary">Agregar comentario</button></div>
+      </div>
+    </div>
+    <footer>
+      <button type="button" id="rDelete" class="danger" data-edit>Eliminar</button>
+      <div class="spacer"></div>
+      <button type="button" id="rCancel">Cerrar</button>
+      <button type="submit" id="rSave" class="primary" data-edit>Guardar</button>
+    </footer>
+  </form>
+</dialog>
+
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="config.js"></script>
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
