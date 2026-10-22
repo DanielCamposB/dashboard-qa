@@ -16,11 +16,17 @@
       { name: "Gestión de defectos / ciclo 2", days: 3 },
       { name: "Regresión", days: 3 },
       { name: "Evidencias y cierre (EVP)", days: 2 }
+    ],
+    express: [
+      { name: "Diseño de casos de prueba", days: 1 },
+      { name: "Ejecución", days: 2 },
+      { name: "Certificación", days: 1 },
+      { name: "Informe final", days: 1 }
     ]
   });
   const defaultRoles = () => ["QA Funcional", "QA Automatizador"];
   const emptyStore = () => ({ clients: [], members: [], roles: defaultRoles(), templates: defaultTemplates(), reqs: [] });
-  const normalize = o => { o.roles ||= defaultRoles(); o.templates ||= defaultTemplates(); o.members ||= []; o.reqs ||= []; o.clients ||= []; if (!o.clients.length) o.clients.push({ id: uid(), name: "General" }); o.reqs.forEach(r => { if (!o.clients.some(c => c.id === r.clientId)) r.clientId = o.clients[0].id; }); o.members.forEach(m => { m.roles ||= m.role ? [m.role] : []; delete m.role; }); return o; };
+  const normalize = o => { o.roles ||= defaultRoles(); o.templates ||= defaultTemplates(); o.templates.express ||= defaultTemplates().express; o.members ||= []; o.reqs ||= []; o.clients ||= []; if (!o.clients.length) o.clients.push({ id: uid(), name: "General" }); o.reqs.forEach(r => { if (!o.clients.some(c => c.id === r.clientId)) r.clientId = o.clients[0].id; }); o.members.forEach(m => { m.roles ||= m.role ? [m.role] : []; delete m.role; }); return o; };
 
   function seed() {
     const t = iso(new Date());
@@ -35,15 +41,17 @@
       const x = { id: uid(), name: a.name, start: s, end: addDays(s, a.days - 1), percent: i < 3 ? 100 : i === 3 ? 50 : 0, assigneeId: m[0].id, blocked: false };
       s = addDays(x.end, 1); return x;
     });
+    const mkActs = (list, start, pcts, who) => { let s = start; return list.map((a, i) => { const x = { id: uid(), name: a.name, start: s, end: addDays(s, a.days - 1), percent: pcts[i] ?? 0, assigneeId: who, blocked: false }; s = addDays(x.end, 1); return x; }); };
+    const ex1 = mkActs(tpl.express, addDays(t, -2), [100, 50, 0, 0], m[1].id), ex2 = mkActs(tpl.express, addDays(t, 2), [], m[2].id);
     const cl = [{ id: uid(), name: "IPS" }, { id: uid(), name: "Hites" }, { id: uid(), name: "PDI" }];
     return {
       clients: cl, members: m, roles: defaultRoles(), templates: tpl,
       reqs: [
         { id: uid(), clientId: cl[0].id, code: "R1903", title: "Aranda - SOLFON", type: "trad", assigneeId: m[0].id, status: "En curso", percent: 0, start: acts[0].start, end: acts[acts.length - 1].end, acts,
           comments: [{ id: uid(), at: new Date().toISOString(), by: "Ana Torres", text: "Casos aprobados por el analista. Iniciando ciclo 1." }] },
-        { id: uid(), clientId: cl[1].id, code: "R2044", title: "Ajuste de reporte de saldos", type: "express", assigneeId: m[1].id, status: "En curso", percent: 60, start: addDays(t, -1), end: addDays(t, 1), acts: [],
+        { id: uid(), clientId: cl[1].id, code: "R2044", title: "Ajuste de reporte de saldos", type: "express", assigneeId: m[1].id, status: "En curso", percent: 0, start: ex1[0].start, end: ex1[3].end, acts: ex1,
           comments: [{ id: uid(), at: new Date().toISOString(), by: "Luis Rojas", text: "Probado 60%, falta validar con datos de producción." }] },
-        { id: uid(), clientId: cl[2].id, code: "R2051", title: "Validación campo teléfono", type: "express", assigneeId: m[2].id, status: "Pendiente", percent: 0, start: addDays(t, 2), end: addDays(t, 2), acts: [], comments: [] }
+        { id: uid(), clientId: cl[2].id, code: "R2051", title: "Validación campo teléfono", type: "express", assigneeId: m[2].id, status: "Pendiente", percent: 0, start: ex2[0].start, end: ex2[3].end, acts: ex2, comments: [] }
       ]
     };
   }
@@ -58,6 +66,8 @@
   function localSave(s) { try { localStorage.setItem(KEY, JSON.stringify(s)); } catch {} }
 
   // ---------- Supabase ----------
+  const PF = ["nombres", "apellido_paterno", "apellido_materno", "cargo", "vertical", "cumpleanos", "telefono"];
+  let profile = {};
   let sb, version = 0, canEdit = false, timer = null, pending = null, userEmail = "";
   async function fetchState() {
     const { data, error } = await sb.from("app_state").select("data,version").eq("id", 1).single();
@@ -78,16 +88,16 @@
   }
 
   D.init = async function () {
-    if (!remote) return { store: localLoad(), forceRead: null, user: "" };
+    if (!remote) { try { profile = JSON.parse(localStorage.getItem("qa-profile") || "{}"); } catch {} return { store: localLoad(), forceRead: null, user: "" }; }
     sb = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseKey);
     const { data: { session } } = await sb.auth.getSession();
     if (!session) return { needLogin: true };
     if (/type=recovery/.test(location.hash)) return { needLogin: true, recovery: true };
     userEmail = (session.user.email || "").toLowerCase();
-    const { data: prof, error } = await sb.from("profiles").select("role").eq("email", userEmail).maybeSingle();
+    const { data: prof, error } = await sb.from("profiles").select("*").eq("email", userEmail).maybeSingle();
     if (error) throw error;
     if (!prof) return { denied: true, user: userEmail };
-    canEdit = prof.role === "editor";
+    canEdit = prof.role === "editor"; profile = prof;
     let store = await fetchState();
     if (!store) { store = canEdit ? seedOrEmpty() : emptyStore(); if (canEdit) { pending = store; await pushNow(); } }
     setInterval(async () => {                       // refresco cada 30 s si no hay cambios por guardar
@@ -103,6 +113,15 @@
     if (!canEdit) return;
     pending = s; clearTimeout(timer); timer = setTimeout(pushNow, 400);
   };
+  D.getProfile = () => profile;
+  D.saveProfile = async p => {
+    const clean = {}; PF.forEach(k => (clean[k] = (p[k] ?? "").toString().trim() || null));
+    if (!remote) { profile = { ...profile, ...clean }; try { localStorage.setItem("qa-profile", JSON.stringify(profile)); } catch {} return; }
+    const { error } = await sb.from("profiles").update(clean).eq("email", userEmail);
+    if (error) throw error;
+    profile = { ...profile, ...clean };
+  };
+  D.listProfiles = async () => { const { data, error } = await sb.from("profiles").select("*").order("email"); if (error) throw error; return data; };
   D.login = async (email, password) => {
     const { error } = await sb.auth.signInWithPassword({ email, password });
     if (error) throw error;

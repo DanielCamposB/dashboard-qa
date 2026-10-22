@@ -84,9 +84,9 @@
   const mname = id => store.members.find(m => m.id === id)?.name || "—";
 
   // ---------- cálculos ----------
-  const span = r => r.type === "trad" && r.acts.length ? [r.acts.map(a => a.start).sort()[0], r.acts.map(a => a.end).sort().pop()] : [r.start, r.end];
+  const span = r => r.acts.length ? [r.acts.map(a => a.start).sort()[0], r.acts.map(a => a.end).sort().pop()] : [r.start, r.end];
   function progress(r) {
-    if (r.type !== "trad" || !r.acts.length) return +r.percent || 0;
+    if (!r.acts.length) return +r.percent || 0;
     const w = r.acts.map(a => d2n(a.end) - d2n(a.start) + 1), tot = w.reduce((s, x) => s + x, 0);
     return Math.round(r.acts.reduce((s, a, i) => s + a.percent * w[i], 0) / tot);
   }
@@ -101,7 +101,7 @@
       if (r.status === "Completado") continue;
       const e = span(r)[1];
       let worst = { d: daysLate(e), what: "Requerimiento" };
-      if (r.type === "trad") for (const a of r.acts) if (a.percent < 100 && daysLate(a.end) > worst.d) worst = { d: daysLate(a.end), what: "Actividad: " + a.name };
+      for (const a of r.acts) if (a.percent < 100 && daysLate(a.end) > worst.d) worst = { d: daysLate(a.end), what: "Actividad: " + a.name };
       if (worst.d >= 1) out.push({ r, ...worst });
     }
     return out.sort((a, b) => b.d - a.d);
@@ -114,14 +114,69 @@
     document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.v === v));
     render();
   }
+  const fullName = () => { const p = D.getProfile(); return [p.nombres, p.apellido_paterno, p.apellido_materno].filter(Boolean).join(" "); };
+  function refreshUserMenu() {
+    const em = boot.user || "", p = D.getProfile();
+    const nm = fullName() || (em ? em.split("@")[0].replace(/[._-]+/g, " ").replace(/\b\w/g, c => c.toUpperCase()) : "Usuario local");
+    const ini = p.nombres ? ((p.nombres[0] || "") + (p.apellido_paterno?.[0] || "")).toUpperCase() : nm.split(" ").slice(0, 2).map(w => w[0]).join("").toUpperCase();
+    $("#avatar").textContent = $("#avatar2").textContent = ini || "?";
+    $("#uname").textContent = p.nombres ? p.nombres.split(" ")[0] : nm; $("#uname2").textContent = nm; $("#uemail").textContent = em;
+    $("#ucargo").textContent = [p.cargo, p.vertical].filter(Boolean).join(" · "); $("#ucargo").hidden = !$("#ucargo").textContent;
+    $("#urole").textContent = readOnly ? "Solo lectura" : "Editor"; $("#urole").className = "badge " + (readOnly ? "read" : "edit");
+    if (fullName()) lsSet("qa-author", fullName()); else if (em && !lsGet("qa-author", "")) lsSet("qa-author", em.split("@")[0]);
+  }
+  function initUserMenu() {
+    $("#userMenu").hidden = false; $("#btnLogout").hidden = !D.remote;
+    const menu = $("#umenu"), btn = $("#avatarBtn"), toggle = open => { menu.hidden = !open; btn.setAttribute("aria-expanded", open); };
+    btn.onclick = e => { e.stopPropagation(); toggle(menu.hidden); };
+    document.addEventListener("click", e => { if (!menu.contains(e.target)) toggle(false); });
+    document.addEventListener("keydown", e => { if (e.key === "Escape") toggle(false); });
+    $("#btnProfile").onclick = () => { toggle(false); openProfile(false); };
+  }
+  // ---------- Mi perfil ----------
+  function openProfile(first) {
+    const f = $("#pform"), p = D.getProfile();
+    f.email.value = boot.user || "(modo local)";
+    ["nombres", "apellido_paterno", "apellido_materno", "cargo", "vertical", "cumpleanos", "telefono"].forEach(k => (f[k].value = p[k] ?? ""));
+    $("#pErr").hidden = true;
+    $("#pHint").textContent = first ? "Bienvenido/a. Completa tu perfil para que el equipo te identifique. Puedes editarlo después desde «Mi perfil»." : "Esta información identifica a cada integrante del equipo.";
+    $("#pdlg").showModal();
+  }
+  async function submitProfile(e) {
+    e.preventDefault(); const f = e.target, err = $("#pErr"); err.hidden = true;
+    if (!f.nombres.value.trim()) { err.textContent = "Escribe tus nombres."; err.hidden = false; return; }
+    if (!f.apellido_paterno.value.trim()) { err.textContent = "Escribe tu apellido paterno."; err.hidden = false; return; }
+    if (f.cumpleanos.value && f.cumpleanos.value > today) { err.textContent = "La fecha de cumpleaños no puede ser futura."; err.hidden = false; return; }
+    const btn = $("#pSave"); btn.disabled = true;
+    try {
+      await D.saveProfile(Object.fromEntries(["nombres", "apellido_paterno", "apellido_materno", "cargo", "vertical", "cumpleanos", "telefono"].map(k => [k, f[k].value])));
+      $("#pdlg").close(); refreshUserMenu(); say("Perfil guardado ✓"); if (!$("#v-team").hidden) renderTeam();
+    } catch (er) {
+      const m = String(er.message || er);
+      err.textContent = /column .* does not exist|schema cache/i.test(m) ? "Falta ejecutar el SQL de perfiles en Supabase (archivo supabase-perfil.sql)." : /permission denied|row-level/i.test(m) ? "No tienes permiso para guardar este perfil." : /failed to fetch|network/i.test(m) ? "No hay conexión con el servidor. Inténtalo de nuevo." : "No se pudo guardar: " + m;
+      err.hidden = false;
+    }
+    btn.disabled = false;
+  }
+  // Directorio de perfiles (solo editores con Supabase)
+  let profCache = { at: 0, rows: [] };
+  async function renderProfiles() {
+    const card = $("#profCard"); card.hidden = !(D.remote && !readOnly); if (card.hidden) return;
+    const draw = rows => {
+      const bd = r => (r.cumpleanos ? new Date(r.cumpleanos + "T00:00:00Z").toLocaleDateString("es", { day: "numeric", month: "long", timeZone: "UTC" }) : "—");
+      $("#profTbl").innerHTML = "<thead><tr><th>Nombre</th><th>Cargo</th><th>Vertical</th><th>Cumpleaños</th><th>Teléfono</th><th>Correo</th><th>Acceso</th></tr></thead><tbody>" +
+        rows.map(r => `<tr><td>${esc([r.nombres, r.apellido_paterno, r.apellido_materno].filter(Boolean).join(" ")) || '<span class="muted">Sin completar</span>'}</td><td>${esc(r.cargo || "—")}</td><td>${esc(r.vertical || "—")}</td><td>${bd(r)}</td><td>${esc(r.telefono || "—")}</td><td>${esc(r.email)}</td><td>${r.role === "editor" ? "Editor" : "Solo lectura"}</td></tr>`).join("") + "</tbody>";
+    };
+    draw(profCache.rows);
+    if (Date.now() - profCache.at < 20000) return;
+    profCache.at = Date.now();
+    try { profCache.rows = await D.listProfiles(); draw(profCache.rows); }
+    catch (er) { $("#profTbl").innerHTML = `<tbody><tr><td class="muted">${/does not exist|schema/i.test(er.message) ? "Falta ejecutar supabase-perfil.sql en Supabase." : "No se pudieron cargar los perfiles: " + esc(er.message)}</td></tr></tbody>`; }
+  }
+
   function applyMode() {
-    if (D.remote) { $("#mode").disabled = true; $("#mode").parentElement.hidden = true; const em = boot.user, nm = em.split("@")[0].replace(/[._-]+/g, " ").replace(/\b\w/g, c => c.toUpperCase()), ini = nm.split(" ").slice(0, 2).map(w => w[0]).join("").toUpperCase();
-      $("#userMenu").hidden = false; $("#avatar").textContent = $("#avatar2").textContent = ini || "?"; $("#uname").textContent = $("#uname2").textContent = nm; $("#uemail").textContent = em;
-      $("#urole").textContent = readOnly ? "Solo lectura" : "Editor"; $("#urole").className = "badge " + (readOnly ? "read" : "edit");
-      const menu = $("#umenu"), btn = $("#avatarBtn"), toggle = open => { menu.hidden = !open; btn.setAttribute("aria-expanded", open); };
-      btn.onclick = e => { e.stopPropagation(); toggle(menu.hidden); };
-      document.addEventListener("click", e => { if (!menu.contains(e.target)) toggle(false); });
-      document.addEventListener("keydown", e => { if (e.key === "Escape") toggle(false); }); if (!lsGet("qa-author", "")) lsSet("qa-author", boot.user.split("@")[0]); }
+    if (D.remote) { $("#mode").disabled = true; $("#mode").parentElement.hidden = true; }
+    refreshUserMenu();
     $("#mode").value = readOnly ? "read" : "edit";
     document.body.classList.toggle("ro", readOnly);
     $("#btnNew").hidden = readOnly; $("#btnImport").hidden = readOnly;
@@ -184,8 +239,8 @@
     let h = `<div class="g-inner" style="width:${300 + W}px"><div class="g-head"><div class="g-row" style="height:46px;border:0"><div class="g-label" style="cursor:default">Requerimiento / actividad</div><div class="g-track" style="width:${W}px">${ticks}</div></div></div>`;
     for (const r of list) {
       const [s, e] = span(r), p = progress(r), st = "st-" + (late(r) && r.status !== "Bloqueado" ? "Atrasado" : r.status.replace(" ", ""));
-      const exp = r.type === "express";
-      h += `<div class="g-row grp"><div class="g-label" data-open="${r.id}">${esc(r.code)} · ${esc(r.title)}<small>${exp ? "Express · " : ""}${esc(mname(r.assigneeId))} · ${p}%</small></div>
+      const exp = !r.acts.length;
+      h += `<div class="g-row grp"><div class="g-label" data-open="${r.id}">${esc(r.code)} · ${esc(r.title)}<small>${r.type === "express" ? "Express · " : ""}${esc(mname(r.assigneeId))} · ${p}%</small></div>
         <div class="g-track" style="width:${W}px">${exp ? bar("req", r.id, r, st, r.code, p, true) : bar("sum", r.id, { start: s, end: e }, "st-sum", "", p, false)}</div></div>`;
       if (!exp) for (const a of r.acts) {
         const ast = a.blocked ? "st-Bloqueado" : a.percent >= 100 ? "st-Completado" : a.end < today ? "st-Atrasado" : a.percent > 0 ? "st-Encurso" : "st-Pendiente";
@@ -255,28 +310,32 @@
     });
   }
   function renderTpl() {
-    const t = store.templates.trad;
-    $("#tplTbl").innerHTML = `<thead><tr><th>#</th><th>Actividad</th><th>Duración (días)</th><th></th></tr></thead><tbody>` +
-      t.map((a, i) => `<tr><td>${i + 1}</td><td><textarea class="grow" rows="1" data-i="${i}" data-f="name">${esc(a.name)}</textarea></td><td><input type="number" min="1" data-i="${i}" data-f="days" value="${a.days}" style="width:80px"></td>
-        <td><button data-up="${i}">↑</button> <button data-rm="${i}" class="danger">✕</button></td></tr>`).join("") + `</tbody>`;
-    $("#tplTbl").querySelectorAll("input,textarea").forEach(i => (i.onchange = () => { t[+i.dataset.i][i.dataset.f] = i.dataset.f === "days" ? Math.max(1, +i.value) : i.value; save(); }));
-    $("#tplTbl").querySelectorAll("[data-rm]").forEach(b => (b.onclick = () => { t.splice(+b.dataset.rm, 1); save(); renderTpl(); }));
-    $("#tplTbl").querySelectorAll("[data-up]").forEach(b => (b.onclick = () => { const i = +b.dataset.up; if (i) { [t[i - 1], t[i]] = [t[i], t[i - 1]]; save(); renderTpl(); } }));
-    $("#tplTbl").querySelectorAll("input,textarea").forEach(i => (i.disabled = readOnly));
-    autosize($("#tplTbl"));
-    document.querySelectorAll("#tplTbl button").forEach(b => (b.hidden = readOnly));
+    for (const k of ["trad", "express"]) {
+      const t = store.templates[k], tbl = $("#tplTbl-" + k);
+      tbl.innerHTML = `<thead><tr><th>#</th><th>Actividad</th><th>Duración (días)</th><th></th></tr></thead><tbody>` +
+        t.map((x, i) => `<tr><td>${i + 1}</td><td><textarea class="grow" rows="1" data-i="${i}" data-f="name">${esc(x.name)}</textarea></td><td><input type="number" min="1" data-i="${i}" data-f="days" value="${x.days}"></td>
+          <td><button data-up="${i}">↑</button> <button data-rm="${i}" class="danger">✕</button></td></tr>`).join("") + `</tbody>`;
+      tbl.querySelectorAll("input,textarea").forEach(i => { i.onchange = () => { t[+i.dataset.i][i.dataset.f] = i.dataset.f === "days" ? Math.max(1, +i.value) : i.value; save(); }; i.disabled = readOnly; });
+      tbl.querySelectorAll("[data-rm]").forEach(b => (b.onclick = () => { t.splice(+b.dataset.rm, 1); save(); renderTpl(); }));
+      tbl.querySelectorAll("[data-up]").forEach(b => (b.onclick = () => { const i = +b.dataset.up; if (i) { [t[i - 1], t[i]] = [t[i], t[i - 1]]; save(); renderTpl(); } }));
+      tbl.querySelectorAll("button").forEach(b => (b.hidden = readOnly));
+      autosize(tbl);
+    }
   }
 
   // ---------- Requerimiento (ventana) ----------
   function fromTemplate(start) {
     let s = start || today;
-    return store.templates.trad.map(a => { const x = { id: uid(), name: a.name, start: s, end: addDays(s, a.days - 1), percent: 0, assigneeId: draft?.assigneeId || "", blocked: false }; s = addDays(x.end, 1); return x; });
+    return store.templates[(draft?.type || "trad") === "express" ? "express" : "trad"].map(a => { const x = { id: uid(), name: a.name, start: s, end: addDays(s, a.days - 1), percent: 0, assigneeId: draft?.assigneeId || "", blocked: false }; s = addDays(x.end, 1); return x; });
   }
   function openReq(id) {
     isNew = !id;
     draft = id ? JSON.parse(JSON.stringify(store.reqs.find(r => r.id === id)))
       : { id: uid(), clientId: clientId !== "all" ? clientId : (store.clients[0]?.id || ""), code: "", title: "", type: "trad", assigneeId: store.members[0]?.id || "", status: "Pendiente", percent: 0, start: today, end: today, acts: [], comments: [] };
     if (isNew) draft.acts = fromTemplate(today);
+    if (!isNew && draft.type === "express" && !draft.acts.length) {           // requerimiento express antiguo: pasa a las 4 actividades
+      draft.acts = fromTemplate(draft.start || today); const done = Math.round((draft.percent || 0) / 100 * draft.acts.length); draft.acts.forEach((x, i) => (x.percent = i < done ? 100 : 0));
+    }
     const f = $("#rform");
     $("#rTitle").textContent = isNew ? "Nuevo requerimiento" : `${draft.code} · ${draft.title}`;
     f.clientId.innerHTML = store.clients.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
@@ -290,8 +349,7 @@
     $("#dlg").showModal(); autosize($("#actTbl"));
   }
   function syncType() {
-    const trad = $("#rform").type.value === "trad";
-    $("#actsBox").hidden = !trad; $("#pctRow").hidden = trad; $("#datesRow").hidden = trad;
+    $("#actsBox").hidden = false; $("#pctRow").hidden = true; $("#datesRow").hidden = true;
   }
   function readForm() {
     const f = $("#rform");
@@ -327,12 +385,10 @@
   function submitReq(e) {
     e.preventDefault(); if (readOnly) return;
     readForm();
-    if (draft.type === "trad") {
-      if (!draft.acts.length) return say("Un requerimiento tradicional necesita al menos una actividad.", 1);
-      if (draft.acts.some(a => a.end < a.start)) return say("Hay una actividad con fecha de fin anterior al inicio.", 1);
-    } else if (draft.end < draft.start) return say("La fecha de fin es anterior al inicio.", 1);
-    if (draft.type === "trad") { const p = progress(draft); if (p >= 100) draft.status = "Completado"; else if (p > 0 && draft.status === "Pendiente") draft.status = "En curso"; }
-    else { if (draft.percent >= 100) draft.status = "Completado"; else if (draft.percent > 0 && draft.status === "Pendiente") draft.status = "En curso"; }
+    if (!draft.acts.length) return say("Agrega al menos una actividad.", 1);
+    if (draft.acts.some(x => x.end < x.start)) return say("Hay una actividad con fecha de fin anterior al inicio.", 1);
+    [draft.start, draft.end] = span(draft);
+    { const p = progress(draft); draft.percent = p; if (p >= 100) draft.status = "Completado"; else if (p > 0 && draft.status === "Pendiente") draft.status = "En curso"; }
     const i = store.reqs.findIndex(r => r.id === draft.id);
     i < 0 ? store.reqs.push(draft) : (store.reqs[i] = draft);
     save(); $("#dlg").close(); say("Guardado ✓"); render();
@@ -360,9 +416,62 @@
     if (!$("#v-gantt").hidden) renderGantt();
     if (!$("#v-team").hidden) renderTeam();
     renderClientSel();
+    if (!$("#v-team").hidden) renderProfiles();
     if (!$("#v-clients").hidden) renderClients();
     if (!$("#v-tpl").hidden) renderTpl();
   }
+  // ---------- Exportar carta Gantt ----------
+  function ganttHtml(forPrint) {
+    const list = visible().sort((x, y) => clientName(x.clientId).localeCompare(clientName(y.clientId)) || x.code.localeCompare(y.code));
+    if (!list.length) return null;
+    const all = list.flatMap(r => span(r)).concat(today).map(d2n);
+    let min = Math.min(...all) - 1, max = Math.max(...all) + 3;
+    const weekly = max - min > 100;
+    if (weekly) min -= (new Date(min * DAY).getUTCDay() + 6) % 7;            // lunes
+    const step = weekly ? 7 : 1, cols = [];
+    for (let n = min; n <= max; n += step) cols.push(n);
+    const COL = { Completado: "#2e9e6a", "En curso": "#2f6fed", Bloqueado: "#e0861b", Atrasado: "#d6394a", Pendiente: "#9aa3b5" };
+    const tint = c => c + "55";
+    const actSt = a => a.blocked ? "Bloqueado" : a.percent >= 100 ? "Completado" : a.end < today ? "Atrasado" : a.percent > 0 ? "En curso" : "Pendiente";
+    const reqSt = r => (late(r) && r.status !== "Bloqueado" && r.status !== "Completado") ? "Atrasado" : r.status;
+    const months = [];
+    cols.forEach(n => { const d = new Date(n * DAY), k = d.toLocaleDateString("es", { month: "short", year: "2-digit", timeZone: "UTC" }); const l = months[months.length - 1]; l && l.k === k ? l.n++ : months.push({ k, n: 1 }); });
+    const cell = (n, s, e, pct, color) => {
+      const to = n + step - 1, today0 = d2n(today), isToday = today0 >= n && today0 <= to;
+      const wk = !weekly && [0, 6].includes(new Date(n * DAY).getUTCDay());
+      const border = isToday ? "border-left:2px solid #d6394a;" : "";
+      if (e < n || s > to) return `<td style="${border}${wk ? "background:#f0f0f0;" : ""}"></td>`;
+      const len = e - s + 1, done = Math.round(pct / 100 * len), idx = Math.max(n, s) - s + (weekly ? Math.min(step - 1, 0) : 0);
+      return `<td style="${border}background:${idx < done ? color : tint(color)};"></td>`;
+    };
+    const th = "background:#0b1220;color:#fff;font-weight:bold;text-align:center;border:1px solid #333;";
+    let t = `<table border="1" cellspacing="0" cellpadding="3" style="border-collapse:collapse;font-family:Calibri,Arial,sans-serif;font-size:${forPrint ? 8 : 11}pt">
+      <tr><td colspan="${9 + cols.length}" style="font-size:16pt;font-weight:bold;border:0">Carta Gantt QA — ${esc(clientId === "all" ? "Todos los clientes" : clientName(clientId))}</td></tr>
+      <tr><td colspan="${9 + cols.length}" style="border:0;color:#555">Generada el ${today} · Vista ${weekly ? "semanal" : "diaria"} · Avance: tono fuerte = completado, tono claro = pendiente · Línea roja = hoy</td></tr>
+      <tr>${["Cliente", "Requerimiento", "Actividad", "Responsable", "Inicio", "Fin", "Avance", "Estado", "Tipo"].map(x => `<td rowspan="2" style="${th}">${x}</td>`).join("")}${months.map(m => `<td colspan="${m.n}" style="${th}">${esc(m.k)}</td>`).join("")}</tr>
+      <tr>${cols.map(n => { const d = new Date(n * DAY); return `<td style="${th}font-size:${weekly ? 7 : 8}pt">${weekly ? d.getUTCDate() + "/" + (d.getUTCMonth() + 1) : d.getUTCDate()}</td>`; }).join("")}</tr>`;
+    const row = (cl, req, act, who, s, e, pct, st, tipo, bold) => `<tr style="${bold ? "font-weight:bold;background:#eef2fb;" : ""}"><td>${esc(cl)}</td><td>${esc(req)}</td><td>${esc(act)}</td><td>${esc(who)}</td><td>${s}</td><td>${e}</td><td style="text-align:center">${pct}%</td><td style="color:${COL[st]};font-weight:bold">${st}</td><td>${tipo}</td>${cols.map(n => cell(n, d2n(s), d2n(e), pct, COL[st])).join("")}</tr>`;
+    for (const r of list) {
+      const [s, e] = span(r), p = progress(r), rs = reqSt(r), cn = clientName(r.clientId), nm = `${r.code} · ${r.title}`;
+      t += row(cn, nm, r.acts.length ? "(resumen)" : "—", mname(r.assigneeId), s, e, p, rs, r.type === "trad" ? "Tradicional" : "Express", true);
+      r.acts.forEach(a => (t += row("", "", a.name, mname(a.assigneeId), a.start, a.end, a.percent, actSt(a), "", false)));
+    }
+    return t + "</table>";
+  }
+  function exportGanttXls() {
+    const t = ganttHtml(false); if (!t) return say("No hay requerimientos para exportar.", 1);
+    const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8"><!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>Carta Gantt</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]--></head><body>${t}</body></html>`;
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob(["\ufeff" + html], { type: "application/vnd.ms-excel" }));
+    a.download = `carta-gantt-qa-${today}.xls`; a.click(); say("Gantt exportado ✓");
+  }
+  function exportGanttPdf() {
+    const t = ganttHtml(true); if (!t) return say("No hay requerimientos para exportar.", 1);
+    const w = window.open("", "_blank"); if (!w) return say("El navegador bloqueó la ventana. Permite ventanas emergentes para este sitio.", 1);
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Carta Gantt QA ${today}</title><style>@page{size:A3 landscape;margin:10mm}body{margin:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}table td{padding:2px 4px;white-space:nowrap}</style></head><body>${t}<script>onload=()=>setTimeout(()=>print(),300)<\/script></body></html>`);
+    w.document.close();
+  }
+
   function csv() {
     const rows = [["Cliente", "Código", "Título", "Tipo", "Responsable", "Estado", "Avance %", "Inicio", "Fin", "Comentarios"]].concat(visible().map(r => {
       const [s, e] = span(r); return [clientName(r.clientId), r.code, r.title, r.type, mname(r.assigneeId), r.status, progress(r), s, e, r.comments.map(c => `${c.at.slice(0, 10)} ${c.by}: ${c.text}`).join(" | ")];
@@ -377,6 +486,8 @@
   $("#btnNew").onclick = () => openReq(null);
   $("#btnExport").onclick = () => D.exportJson(store);
   $("#btnCsv").onclick = csv;
+  $("#btnGanttXls").onclick = exportGanttXls;
+  $("#btnGanttPdf").onclick = exportGanttPdf;
   $("#btnImport").onclick = () => $("#fileImport").click();
   $("#fileImport").onchange = async e => {
     try { const s = JSON.parse(await e.target.files[0].text()); if (!s.reqs || !s.members) throw 0; if (!confirm("Esto reemplaza todos los datos actuales. ¿Continuar?")) return; store = s; save(); render(); say("Importado ✓"); }
@@ -389,9 +500,16 @@
   $("#roleForm").onsubmit = e => { e.preventDefault(); if (readOnly) return; const v = e.target.role.value.trim(); if (store.roles.includes(v)) return say("Ese rol ya existe.", 1); store.roles.push(v); e.target.reset(); save(); render(); };
   $("#clientSel").onchange = e => { clientId = e.target.value; lsSet("qa-client", clientId); render(); };
   $("#clientForm").onsubmit = e => { e.preventDefault(); if (readOnly) return; const v = e.target.name.value.trim(); if (!v) return; if (store.clients.some(c => c.name.toLowerCase() === v.toLowerCase())) return say("Ese cliente ya existe.", 1); const c = { id: uid(), name: v }; store.clients.push(c); e.target.reset(); save(); clientId = c.id; lsSet("qa-client", clientId); render(); say("Cliente creado y seleccionado ✓"); };
-  $("#btnTplAdd").onclick = () => { store.templates.trad.push({ name: "Nueva actividad", days: 1 }); save(); renderTpl(); };
-  $("#btnTplReset").onclick = () => { if (confirm("¿Restaurar la plantilla por defecto?")) { store.templates = D.defaultTemplates(); save(); renderTpl(); } };
-  $("#rform").type.onchange = () => { readForm(); syncType(); if (draft.type === "trad" && !draft.acts.length) { draft.acts = fromTemplate(draft.start || today); renderActs(); } };
+  document.querySelectorAll(".tplAdd").forEach(b => (b.onclick = () => { store.templates[b.dataset.k].push({ name: "Nueva actividad", days: 1 }); save(); renderTpl(); }));
+  document.querySelectorAll(".tplReset").forEach(b => (b.onclick = () => { if (confirm("¿Restaurar esta plantilla por defecto?")) { store.templates[b.dataset.k] = D.defaultTemplates()[b.dataset.k]; save(); renderTpl(); } }));
+  $("#rform").type.onchange = () => {
+    const prev = draft.type; readForm(); syncType();
+    if (draft.type === prev) return;
+    const label = draft.type === "express" ? "QA Express" : "QA Tradicional";
+    const prevNames = JSON.stringify((store.templates[prev === "express" ? "express" : "trad"]).map(t => t.name)), untouched = JSON.stringify(draft.acts.map(t => t.name)) === prevNames;
+    if (!draft.acts.length || untouched || confirm(`Cambiar a ${label} reemplaza las actividades actuales por las de su plantilla. ¿Continuar?`)) { draft.acts = fromTemplate(draft.acts[0]?.start || today); renderActs(); }
+    else { draft.type = prev; $("#rform").type.value = prev; syncType(); }
+  };
   $("#rform").assigneeId.onchange = () => { draft.assigneeId = $("#rform").assigneeId.value; };
   $("#btnActAdd").onclick = () => { const last = draft.acts[draft.acts.length - 1]; const s = last ? addDays(last.end, 1) : today; draft.acts.push({ id: uid(), name: "Nueva actividad", start: s, end: s, percent: 0, assigneeId: draft.assigneeId, blocked: false }); renderActs(); };
   $("#btnActTpl").onclick = () => { if (!draft.acts.length || confirm("Esto reemplaza las actividades actuales por la plantilla. ¿Continuar?")) { readForm(); draft.acts = fromTemplate(draft.acts[0]?.start || today); renderActs(); } };
@@ -406,5 +524,9 @@
   paintTheme();
   D.onError = m => say(m, 1);
   D.onRemoteChange = s => { store = s; if (!$("#dlg").open) render(); };
+  $("#pform").onsubmit = submitProfile;
+  $("#pClose").onclick = $("#pCancel").onclick = () => $("#pdlg").close();
+  initUserMenu();
   applyMode(); render();
+  if (D.remote && !D.getProfile().nombres) setTimeout(() => openProfile(true), 400);
 })();

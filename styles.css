@@ -214,8 +214,8 @@ button.danger:hover{background:color-mix(in srgb,var(--s-atr) 14%,transparent);b
 input,select,textarea{font-size:15px}
 input:not([type=checkbox]):not([type=radio]),select,textarea{padding:9px 12px;min-height:40px}
 textarea.grow{width:100%;min-height:40px;resize:vertical;overflow:hidden;line-height:1.35;font-family:inherit;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:9px 12px}
-#tplTbl{table-layout:fixed}#tplTbl th:nth-child(1){width:46px}#tplTbl th:nth-child(3){width:150px}#tplTbl th:nth-child(4){width:130px}
-#tplTbl input[type=number]{width:100%!important}
+[id^="tplTbl"]{table-layout:fixed}[id^="tplTbl"] th:nth-child(1){width:46px}[id^="tplTbl"] th:nth-child(3){width:150px}[id^="tplTbl"] th:nth-child(4){width:130px}
+[id^="tplTbl"] input[type=number]{width:100%!important}
 #actTbl{table-layout:fixed;min-width:760px}
 #actTbl th:nth-child(1){width:30%}#actTbl th:nth-child(2){width:17%}#actTbl th:nth-child(3),#actTbl th:nth-child(4){width:15%}#actTbl th:nth-child(5){width:8%}#actTbl th:nth-child(6){width:6%}#actTbl th:nth-child(7){width:6%}
 #actTbl input,#actTbl select,#actTbl textarea{font-size:13px;padding:6px 8px;min-height:34px}
@@ -223,3 +223,13 @@ textarea.grow{width:100%;min-height:40px;resize:vertical;overflow:hidden;line-he
 .rgrid .col:first-child{overflow-x:auto}
 dialog{width:min(1240px,97vw)}
 .rgrid{grid-template-columns:1.9fr 1fr}
+
+/* ---- Mi perfil ---- */
+.pdlg{width:min(720px,96vw)}
+.pbody{padding:14px 20px 8px}
+.row3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+@media(max-width:640px){.row3,.pbody .row2{grid-template-columns:1fr}}
+.pbody .loginErr{background:color-mix(in srgb,var(--s-atr) 18%,transparent);border-left:4px solid var(--s-atr);padding:8px 10px;border-radius:6px;margin:8px 0;font-size:13px}
+.ucargo{display:block;margin-top:10px;color:var(--mut)}
+.uitem.uprofile{color:var(--ink)}.uitem.uprofile:hover{background:color-mix(in srgb,var(--acc) 12%,transparent)}
+#profTbl td,#profTbl th{white-space:nowrap}

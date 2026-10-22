@@ -39,7 +39,9 @@
     <div class="umenu" id="umenu" hidden>
       <div class="uhead"><span class="avatar big" id="avatar2">?</span>
         <div><b id="uname2"></b><small id="uemail"></small><span class="badge" id="urole"></span></div></div>
+      <small class="ucargo" id="ucargo"></small>
       <hr>
+      <button type="button" class="uitem uprofile" id="btnProfile"><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Mi perfil</button>
       <button type="button" class="uitem" id="btnLogout"><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Cerrar sesión</button>
     </div>
   </div>
@@ -96,6 +98,8 @@
   <div class="toolbar">
     <span class="muted">Solo requerimientos filtrados en el Dashboard. Arrastra una barra para mover fechas (modo Editor).</span>
     <div class="spacer"></div>
+    <button id="btnGanttXls" class="ghost"><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v12M7 11l5 5 5-5M4 20h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Exportar Gantt (Excel)</button>
+    <button id="btnGanttPdf" class="ghost"><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9V3h12v6M6 18H4v-7h16v7h-2M6 14h12v7H6z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>Exportar Gantt (PDF)</button>
     <div class="seg" id="zoom"><button data-z="32">Día</button><button data-z="14" class="on">Semana</button><button data-z="5">Mes</button></div>
   </div>
   <main id="gantt" class="gantt"></main>
@@ -111,6 +115,11 @@
       <button class="primary" data-edit>Agregar</button>
     </form>
     <table id="memberTbl"></table>
+  </div>
+  <div class="card" id="profCard" hidden>
+    <h2>Perfiles de usuarios</h2>
+    <p class="muted">Información que cada usuario completó en «Mi perfil». Solo la ven los editores.</p>
+    <div class="tablewrap"><table id="profTbl"></table></div>
   </div>
   <div class="card">
     <h2>Roles</h2>
@@ -132,12 +141,44 @@
 <section id="v-tpl" class="view" hidden>
   <div class="card">
     <h2>Actividades base de QA Tradicional</h2>
-    <p class="muted">Se copian a cada requerimiento tradicional nuevo, y allí puedes ajustarlas. Cambiar esto no altera requerimientos ya creados.</p>
-    <table id="tplTbl"></table>
-    <button id="btnTplAdd" data-edit>+ Actividad</button>
-    <button id="btnTplReset" data-edit>Restaurar por defecto</button>
+    <p class="muted">Se copian a cada requerimiento tradicional nuevo (carta Gantt completa), y allí puedes ajustarlas. Cambiar esto no altera requerimientos ya creados.</p>
+    <table id="tplTbl-trad"></table>
+    <button class="tplAdd" data-k="trad" data-edit>+ Actividad</button>
+    <button class="tplReset" data-k="trad" data-edit>Restaurar por defecto</button>
+  </div>
+  <div class="card">
+    <h2>Actividades base de QA Express</h2>
+    <p class="muted">Pruebas rápidas: diseño de casos, ejecución, certificación e informe final. Se copian a cada requerimiento express nuevo.</p>
+    <table id="tplTbl-express"></table>
+    <button class="tplAdd" data-k="express" data-edit>+ Actividad</button>
+    <button class="tplReset" data-k="express" data-edit>Restaurar por defecto</button>
   </div>
 </section>
+
+<dialog id="pdlg" class="pdlg">
+  <form method="dialog" id="pform" class="rform">
+    <header><h2>Mi perfil</h2><button type="button" id="pClose" aria-label="Cerrar">✕</button></header>
+    <div class="pbody">
+      <p class="muted" id="pHint">Esta información identifica a cada integrante del equipo.</p>
+      <div id="pErr" class="loginErr" hidden></div>
+      <label>Correo de acceso <input name="email" disabled></label>
+      <div class="row3">
+        <label>Nombres <input name="nombres" required autocomplete="given-name"></label>
+        <label>Apellido paterno <input name="apellido_paterno" required autocomplete="family-name"></label>
+        <label>Apellido materno <input name="apellido_materno"></label>
+      </div>
+      <div class="row2">
+        <label>Rol / cargo en la empresa <input name="cargo" placeholder="Ej: Analista QA, Líder QA"></label>
+        <label>Vertical donde trabaja <input name="vertical" placeholder="Ej: Banca, Retail, Gobierno"></label>
+      </div>
+      <div class="row2">
+        <label>Cumpleaños <input type="date" name="cumpleanos"></label>
+        <label>Teléfono <input name="telefono" type="tel" autocomplete="tel" placeholder="+56 9 ..."></label>
+      </div>
+    </div>
+    <footer><div class="spacer"></div><button type="button" id="pCancel">Cerrar</button><button type="submit" class="primary" id="pSave">Guardar perfil</button></footer>
+  </form>
+</dialog>
 
 <dialog id="dlg">
   <form method="dialog" id="rform" class="rform">
