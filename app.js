@@ -215,7 +215,8 @@
           <td><div class="pbar"><i style="width:${p}%"></i><span>${p}%</span></div></td><td>${s}</td><td>${e}</td>
           <td class="lc">${lc ? `<small>${lc.at.slice(0, 10)} · ${esc(lc.by)}</small><br>${esc(lc.text.slice(0, 90))}` : '<small class="muted">Sin comentarios</small>'} <small class="muted">(${r.comments.length})</small></td></tr>`;
       }).join("") || `<tr><td colspan="9" class="muted" style="padding:20px">Sin requerimientos. Usa "+ Requerimiento".</td></tr>`) + `</tbody>`;
-    $("#tbl").querySelectorAll("tbody tr[data-id]").forEach(tr => (tr.onclick = () => openReq(tr.dataset.id)));
+    const hs = [...$("#tbl").querySelectorAll("thead th")].map(t => t.textContent);   // etiquetas para la vista de tarjetas en móvil
+    $("#tbl").querySelectorAll("tbody tr[data-id]").forEach(tr => { [...tr.children].forEach((td, i) => (td.dataset.l = hs[i] || "")); tr.onclick = () => openReq(tr.dataset.id); });
   }
 
   // ---------- Gantt ----------
@@ -236,7 +237,7 @@
       const s = d2n(obj.start), e = Math.max(d2n(obj.end), s);
       return `<div class="bar ${st}${drag ? "" : " nodrag"}" data-k="${kind}" data-id="${id}" style="left:${x(s)}px;width:${(e - s + 1) * pxDay}px" title="${esc(label)} · ${pct}%"><div class="fill" style="width:${pct}%"></div><i class="h l"></i><span>${pxDay >= 14 ? esc(label) : ""}</span><i class="h r"></i></div>`;
     };
-    let h = `<div class="g-inner" style="width:${300 + W}px"><div class="g-head"><div class="g-row" style="height:46px;border:0"><div class="g-label" style="cursor:default">Requerimiento / actividad</div><div class="g-track" style="width:${W}px">${ticks}</div></div></div>`;
+    let h = `<div class="g-inner" style="width:calc(var(--lw) + ${W}px)"><div class="g-head"><div class="g-row" style="height:46px;border:0"><div class="g-label" style="cursor:default">Requerimiento / actividad</div><div class="g-track" style="width:${W}px">${ticks}</div></div></div>`;
     for (const r of list) {
       const [s, e] = span(r), p = progress(r), st = "st-" + (late(r) && r.status !== "Bloqueado" ? "Atrasado" : r.status.replace(" ", ""));
       const exp = !r.acts.length;
@@ -247,7 +248,7 @@
         h += `<div class="g-row"><div class="g-label" data-open="${r.id}">&nbsp;&nbsp;${esc(a.name)}<small>${esc(mname(a.assigneeId))}</small></div><div class="g-track" style="width:${W}px">${bar("act", r.id + "|" + a.id, a, ast, a.percent + "%", a.percent, true)}</div></div>`;
       }
     }
-    h += `<div style="position:absolute;left:300px;top:46px;bottom:0;width:${W}px;pointer-events:none"><div class="today" style="left:${x(d2n(today)) + pxDay / 2}px"></div></div></div>`;
+    h += `<div style="position:absolute;left:var(--lw);top:46px;bottom:0;width:${W}px;pointer-events:none"><div class="today" style="left:${x(d2n(today)) + pxDay / 2}px"></div></div></div>`;
     g.innerHTML = h;
     g.querySelectorAll("[data-open]").forEach(l => (l.onclick = () => openReq(l.dataset.open)));
     g.querySelectorAll(".bar").forEach(bindDrag);
