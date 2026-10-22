@@ -32,7 +32,7 @@
     $("#heroArt").innerHTML = s;
   }
   function showLogin(boot) {
-    $("#login").hidden = false; $("#app").hidden = true; document.querySelector("header.top").hidden = true;
+    $("#login").hidden = false; $("#app").hidden = true; document.querySelector("header.top").hidden = true; $("#actionbar").hidden = true;
     document.body.classList.add("on-login"); drawArt();
     const f = $("#loginForm"), err = $("#loginErr"), info = $("#loginInfo");
     let mode = boot.recovery ? "newpw" : "login";
@@ -121,6 +121,7 @@
     $("#mode").value = readOnly ? "read" : "edit";
     document.body.classList.toggle("ro", readOnly);
     $("#btnNew").hidden = readOnly; $("#btnImport").hidden = readOnly;
+    $("#actionbar").classList.toggle("ro", readOnly);
     document.querySelectorAll("[data-edit]").forEach(e => (e.hidden = readOnly));
   }
 
@@ -366,6 +367,9 @@
   $("#rDelete").onclick = () => { if (confirm("¿Eliminar este requerimiento y su seguimiento?")) { store.reqs = store.reqs.filter(r => r.id !== draft.id); save(); $("#dlg").close(); render(); } };
 
   $("#btnLogout").onclick = D.logout;
+  const paintTheme = () => { const t = document.documentElement.dataset.theme; document.querySelectorAll("#themes button").forEach(b => { b.classList.toggle("on", b.dataset.t === t); b.setAttribute("aria-pressed", b.dataset.t === t); }); };
+  document.querySelectorAll("#themes button").forEach(b => (b.onclick = () => { document.documentElement.dataset.theme = b.dataset.t; lsSet("qa-theme", b.dataset.t); paintTheme(); }));
+  paintTheme();
   D.onError = m => say(m, 1);
   D.onRemoteChange = s => { store = s; if (!$("#dlg").open) render(); };
   applyMode(); render();

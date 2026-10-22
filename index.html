@@ -6,11 +6,13 @@
 <title>Dashboard QA</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Kumbh+Sans:wght@400;600;800&display=swap" rel="stylesheet">
+<link rel="icon" href="logo-sonda.png">
+<script>try{document.documentElement.dataset.theme=localStorage.getItem("qa-theme")||"sonda"}catch(e){document.documentElement.dataset.theme="sonda"}</script>
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 <header class="top">
-  <h1>Dashboard QA</h1>
+  <div class="brandbar"><img src="logo-sonda.png" alt="Sonda" class="logo"><h1>Dashboard QA</h1></div>
   <nav class="tabs" id="tabs">
     <button data-v="dash" class="on">Dashboard</button>
     <button data-v="gantt">Gantt</button>
@@ -18,6 +20,14 @@
     <button data-v="tpl">Plantilla de actividades</button>
   </nav>
   <div class="spacer"></div>
+  <label class="modeLbl">Modo
+    <select id="mode"><option value="edit">Editor</option><option value="read">Solo lectura</option></select>
+  </label>
+  <div class="themes" id="themes" role="group" aria-label="Tema de color">
+    <button type="button" data-t="sonda" title="Color Sonda" aria-label="Tema color Sonda"></button>
+    <button type="button" data-t="bn" title="Blanco y negro" aria-label="Tema blanco y negro"></button>
+    <button type="button" data-t="negro" title="Solo negro" aria-label="Tema solo negro"></button>
+  </div>
   <div class="usermenu" id="userMenu" hidden>
     <button type="button" class="avatarBtn" id="avatarBtn" aria-haspopup="true" aria-expanded="false">
       <span class="avatar" id="avatar">?</span>
@@ -31,14 +41,14 @@
       <button type="button" class="uitem" id="btnLogout"><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Cerrar sesión</button>
     </div>
   </div>
-  <label>Modo
-    <select id="mode"><option value="edit">Editor</option><option value="read">Solo lectura</option></select>
-  </label>
-  <button id="btnNew" class="primary">+ Requerimiento</button>
-  <button id="btnExport">Respaldo JSON</button>
-  <button id="btnImport">Importar</button>
-  <input type="file" id="fileImport" accept=".json" hidden>
 </header>
+<div class="actionbar" id="actionbar">
+  <button id="btnNew" class="primary big"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg>Nuevo requerimiento</button>
+  <div class="spacer"></div>
+  <button id="btnImport" class="ghost"><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5M4 20h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Importar</button>
+  <button id="btnExport" class="ghost"><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v12M7 11l5 5 5-5M4 20h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Respaldo JSON</button>
+  <input type="file" id="fileImport" accept=".json" hidden>
+</div>
 <div id="msg" class="msg"></div>
 <section id="login" class="login-wrap" hidden>
 <div class="login-hero">
