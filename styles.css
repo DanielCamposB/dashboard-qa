@@ -342,3 +342,12 @@ dialog{width:min(1240px,97vw)}
 .imdlg{width:min(1000px,96vw)}
 #imTbl td,#imTbl th{white-space:nowrap}
 #imFile{margin:8px 0;width:100%}
+
+/* Ventana de requerimiento más amplia: evita que los campos de la tabla de actividades se solapen */
+#dlg{width:min(1560px,98vw)}
+#dlg .rgrid{grid-template-columns:2.6fr 1fr;max-height:76vh}
+#actTbl{min-width:900px}
+#actTbl th:nth-child(1){width:26%}#actTbl th:nth-child(2){width:23%}#actTbl th:nth-child(3),#actTbl th:nth-child(4){width:15%}#actTbl th:nth-child(5){width:9%}#actTbl th:nth-child(6){width:5%}#actTbl th:nth-child(7){width:7%}
+#actTbl .rolepick{display:block;min-width:0;width:100%}
+#actTbl .rolepick summary{max-width:none;width:100%;box-sizing:border-box;min-height:34px;display:flex;align-items:center}
+#actTbl input[type=date]{min-width:128px}
