@@ -37,6 +37,8 @@ button.danger{color:var(--s-atr)}
 .read .bar{cursor:default}.read .bar .h{display:none}
 .st-Pendiente{background:var(--s-pend)}.st-Encurso{background:var(--s-curso)}.st-Bloqueado{background:var(--s-bloq)}.st-Atrasado{background:var(--s-atr)}.st-Completado{background:var(--s-ok)}
 .msg{padding:0 20px 14px;color:var(--mut)}.msg.err{color:var(--s-atr)}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:9999;max-width:min(560px,90vw);padding:12px 18px;border-radius:10px;background:#0f1a2b;color:#e8eefc;border:1px solid #2a3a55;box-shadow:0 8px 30px #000a;cursor:pointer}
+.toast.err{border-color:#e5484d;background:#2a1216;color:#ffb4b8}
 .panel{position:fixed;right:0;top:0;bottom:0;width:380px;max-width:100%;background:var(--card);border-left:1px solid var(--line);padding:18px;overflow:auto;z-index:20;box-shadow:-8px 0 24px rgba(0,0,0,.15)}
 .panel label{display:block;margin:10px 0;font-size:12px;color:var(--mut)}
 .panel input,.panel select,.panel textarea{width:100%;margin-top:3px;color:var(--ink)}
@@ -204,7 +206,10 @@ button.danger:hover{background:color-mix(in srgb,var(--s-atr) 14%,transparent);b
 .rpmenu{position:absolute;z-index:30;top:calc(100% + 4px);left:0;min-width:100%;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:6px;box-shadow:0 10px 26px rgba(0,0,0,.35)}
 .rpmenu label{display:flex;gap:8px;align-items:center;padding:6px 8px;border-radius:6px;cursor:pointer;white-space:nowrap}
 .rpmenu label:hover{background:color-mix(in srgb,var(--acc) 12%,transparent)}
-.rpmenu input{width:auto;margin:0}
+.rpmenu input,.rform .rpmenu label input{width:auto;margin:0}
+.rform .rpmenu label{display:flex;margin:0;color:var(--ink)}
+.rform .lbl{font-size:12px;color:var(--mut);margin:8px 0}.rform .lbl .rolepick{display:block;margin-top:3px}
+#actTbl .rolepick{min-width:140px}#actTbl .rolepick summary{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px}
 
 .clientLbl{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:.04em;font-weight:600}
 #clientSel{min-width:190px;padding:8px 12px;font-size:14px;font-weight:700;text-transform:none;letter-spacing:0;color:var(--ink);border:1.5px solid var(--acc);border-radius:10px}

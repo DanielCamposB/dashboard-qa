@@ -5,7 +5,20 @@
   const d2n = s => Math.round(Date.parse(s + "T00:00:00Z") / DAY);
   const n2d = n => new Date(n * DAY).toISOString().slice(0, 10);
   const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-  const say = (m, err) => { const e = $("#msg"); e.textContent = m || ""; e.className = "msg" + (err ? " err" : ""); if (m && !err) setTimeout(() => say(""), 1800); };
+  const say = (m, err) => {
+    const e = $("#msg"); e.textContent = m || ""; e.className = "msg" + (err ? " err" : ""); if (m && !err) setTimeout(() => say(""), 1800);
+    if (m) toast(m, err);
+  };
+  // Aviso visible también sobre ventanas modales (el #msg de la página queda tapado por ellas)
+  function toast(m, err) {
+    const open = [...document.querySelectorAll("dialog[open]")].pop();
+    const t = document.createElement("div"); t.className = "toast" + (err ? " err" : ""); t.setAttribute("role", "alert"); t.textContent = m;
+    t.onclick = () => t.remove();
+    (open || document.body).append(t); setTimeout(() => t.remove(), err ? 9000 : 2200);
+  }
+  const errText = e => (e && (e.message || e.error_description || e.details)) || String(e);
+  window.addEventListener("error", ev => { console.error(ev.error || ev.message); toast("Error: " + (ev.message || errText(ev.error)), 1); });
+  window.addEventListener("unhandledrejection", ev => { console.error(ev.reason); toast("Error: " + errText(ev.reason), 1); });
   const lsGet = (k, d) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } };
   const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
 
@@ -82,6 +95,13 @@
   const memberRoles = id => store.members.find(m => m.id === id)?.roles || [];
   const pick = (attr, sel, off) => `<details class="rolepick"><summary>${sel.length ? esc(sel.join(", ")) : "Sin rol"}</summary><div class="rpmenu">${store.roles.length ? store.roles.map(r => `<label><input type="checkbox" ${attr} value="${esc(r)}"${sel.includes(r) ? " checked" : ""}${off ? " disabled" : ""}> ${esc(r)}</label>`).join("") : '<small class="muted">Crea un rol primero</small>'}</div></details>`;
   const mname = id => store.members.find(m => m.id === id)?.name || "—";
+  // Responsables: lista (assigneeIds); assigneeId se mantiene como el primero por compatibilidad con datos antiguos
+  const ids = x => (x?.assigneeIds?.length ? x.assigneeIds : x?.assigneeId ? [x.assigneeId] : []).filter(i => store.members.some(m => m.id === i));
+  const effIds = (a, r) => (ids(a).length ? ids(a) : ids(r));
+  const mnames = (x, fb) => { const l = effIds(x, fb); return l.length ? l.map(mname).join(", ") : "—"; };
+  const setIds = (x, l) => { x.assigneeIds = l; x.assigneeId = l[0] || ""; };
+  const rolesOf = x => [...new Set(ids(x).flatMap(memberRoles))];
+  const memberPick = (attr, sel, off) => `<details class="rolepick"><summary>${sel.length ? esc(sel.map(mname).join(", ")) : "Sin asignar"}</summary><div class="rpmenu">${store.members.length ? store.members.map(m => `<label><input type="checkbox" ${attr} value="${m.id}"${sel.includes(m.id) ? " checked" : ""}${off ? " disabled" : ""}> ${esc(m.name)}${m.roles.length ? " · " + esc(m.roles.join(", ")) : ""}</label>`).join("") : '<small class="muted">Agrega miembros en Equipo</small>'}</div></details>`;
 
   // ---------- cálculos ----------
   const span = r => r.acts.length ? [r.acts.map(a => a.start).sort()[0], r.acts.map(a => a.end).sort().pop()] : [r.start, r.end];
@@ -260,15 +280,15 @@
   // ---------- Dashboard ----------
   function visible() {
     const t = $("#fType").value, ro = $("#fRole").value, a = $("#fAssignee").value, s = $("#fStatus").value, q = $("#fText").value.toLowerCase();
-    return scoped().filter(r => (!t || r.type === t) && (!a || r.assigneeId === a) && (!ro || memberRoles(r.assigneeId).includes(ro)) && (!s || r.status === s) &&
+    return scoped().filter(r => (!t || r.type === t) && (!a || ids(r).includes(a)) && (!ro || rolesOf(r).includes(ro)) && (!s || r.status === s) &&
       (!q || (r.code + " " + r.title + " " + r.comments.map(c => c.text).join(" ")).toLowerCase().includes(q)));
   }
   function renderDash() {
     const all = scoped(), c = f => all.filter(f).length;
     const al = alertsList(), st = staleList(), total = al.length + st.length;
     $("#alerts").innerHTML = total ? `<details open><summary><b>${total} alerta${total > 1 ? "s" : ""}</b> · ${al.length} de atraso · ${st.length} sin actualizar</summary>` +
-      al.map(x => `<div class="al al${lvl(x.d)}" data-id="${x.r.id}"><b>${lvlTxt(x.d)} de atraso</b> · ${esc(x.r.code)} ${esc(x.r.title)} · <span>${esc(x.what)}</span> · ${esc(mname(x.r.assigneeId))}</div>`).join("") +
-      st.map(r => `<div class="al alS" data-id="${r.id}"><b>Sin actualizar hace ${staleDays(r)} días hábiles</b> · ${esc(r.code)} ${esc(r.title)} · <span>Último avance: ${ldate(r.lastUpdate)}</span> · ${esc(mname(r.assigneeId))}</div>`).join("") + "</details>" : "";
+      al.map(x => `<div class="al al${lvl(x.d)}" data-id="${x.r.id}"><b>${lvlTxt(x.d)} de atraso</b> · ${esc(x.r.code)} ${esc(x.r.title)} · <span>${esc(x.what)}</span> · ${esc(mnames(x.r))}</div>`).join("") +
+      st.map(r => `<div class="al alS" data-id="${r.id}"><b>Sin actualizar hace ${staleDays(r)} días hábiles</b> · ${esc(r.code)} ${esc(r.title)} · <span>Último avance: ${ldate(r.lastUpdate)}</span> · ${esc(mnames(r))}</div>`).join("") + "</details>" : "";
     $("#alerts").querySelectorAll(".al").forEach(x => (x.onclick = () => openReq(x.dataset.id)));
     $("#kpis").innerHTML = [["Requerimientos", all.length], ["QA Express", c(r => r.type === "express")], ["QA Tradicional", c(r => r.type === "trad")],
       ["En curso", c(r => r.status === "En curso")], ["Bloqueados", c(r => r.status === "Bloqueado")], ["Atrasados", c(late)], ["Sin actualizar", st.length], ["Entregables vencidos", all.reduce((n, r) => n + delOverdue(r).length, 0)], ["Completados", c(r => r.status === "Completado")]]
@@ -284,7 +304,7 @@
       (rows.map(r => {
         const p = progress(r), [s, e] = span(r), lc = lastComment(r);
         return `<tr data-id="${r.id}">${clientId === "all" ? `<td>${esc(clientName(r.clientId))}</td>` : ""}<td><b>${esc(r.code)}</b></td><td>${esc(r.title)}</td>
-          <td><span class="pill ${r.type}">${r.type === "trad" ? "Tradicional" : "Express"}</span></td><td>${esc(mname(r.assigneeId))}<br><small class="muted">${esc(memberRoles(r.assigneeId).join(", "))}</small></td>
+          <td><span class="pill ${r.type}">${r.type === "trad" ? "Tradicional" : "Express"}</span></td><td>${esc(mnames(r))}<br><small class="muted">${esc(rolesOf(r).join(", "))}</small></td>
           <td><span class="dot ${health(r).lvl}" title="${esc(health(r).why.join(" · ") || "En plazo")}"></span> <span class="st st-${r.status.replace(" ", "")}">${r.status}</span>${late(r) ? ` <span class="st al${lvl(daysLate(span(r)[1]))}">Atrasado ${lvlTxt(daysLate(span(r)[1]))}</span>` : ""}</td>
           <td><div class="pbar"><i style="width:${p}%"></i><span>${p}%</span></div></td><td>${r.deliverables.length ? `${delDone(r)}/${r.deliverables.length}${delOverdue(r).length ? ` <span class="st al3">${delOverdue(r).length} vencido(s)</span>` : ""}` : "—"}</td><td>${s}</td><td>${e}${slip(r) ? ` <span class="st al1" title="Comprometida: ${r.committedEnd}">+${slip(r)} d</span>` : ""}</td>
           <td class="lc">${lc ? `<small>${lc.at.slice(0, 10)} · ${esc(lc.by)}</small><br>${esc(lc.text.slice(0, 90))}` : '<small class="muted">Sin comentarios</small>'} <small class="muted">(${r.comments.length})</small></td></tr>`;
@@ -313,7 +333,7 @@
     }).join("");
     $("#resCli").innerHTML = "<thead><tr><th>Cliente</th><th>Total</th><th>En curso</th><th>Verde</th><th>Amarillo</th><th>Rojo</th><th>Atrasados</th><th>Sin actualizar</th><th>Entreg. vencidos</th><th>Ejecución</th><th>Automatizado</th><th>Defectos abiertos</th></tr></thead><tbody>" + (rows || '<tr><td class="muted">Sin clientes</td></tr>') + "</tbody>";
     const att = hs.filter(x => x.h.lvl !== "g").sort((x, y) => (x.h.lvl === "r" ? 0 : 1) - (y.h.lvl === "r" ? 0 : 1) || span(x.r)[1].localeCompare(span(y.r)[1]));
-    $("#resAtt").innerHTML = att.length ? att.map(({ r, h }) => `<div class="hrow" data-open="${r.id}"><div class="hinfo"><span class="dot ${h.lvl}"></span> <b>${esc(r.code)}</b> · ${esc(r.title)} <small class="muted">${esc(clientName(r.clientId))} · ${esc(mname(r.assigneeId))} · plazo ${span(r)[1]}</small>
+    $("#resAtt").innerHTML = att.length ? att.map(({ r, h }) => `<div class="hrow" data-open="${r.id}"><div class="hinfo"><span class="dot ${h.lvl}"></span> <b>${esc(r.code)}</b> · ${esc(r.title)} <small class="muted">${esc(clientName(r.clientId))} · ${esc(mnames(r))} · plazo ${span(r)[1]}</small>
       <div class="hact">${esc(h.why.join(" · "))}</div></div><div class="hctl"><button class="ghost">Abrir</button></div></div>`).join("") : '<p class="muted">Nada en riesgo. Todo en plazo 👌</p>';
     $("#resAtt").querySelectorAll("[data-open]").forEach(x => (x.onclick = () => openReq(x.dataset.open)));
   }
@@ -325,7 +345,7 @@
     const mineOn = $("#hoyMine").checked, me = myMemberId(), mine = mineOn && me;
     $("#hoyMineNote").textContent = mineOn && !me ? "No encontré tu correo en la pestaña Equipo; se muestran todas." : "";
     const items = [];
-    scoped().forEach(r => { if (r.status === "Completado") return; r.acts.forEach(a => { if (a.percent >= 100) return; if (mine && (a.assigneeId || r.assigneeId) !== me) return; items.push({ r, a }); }); });
+    scoped().forEach(r => { if (r.status === "Completado") return; r.acts.forEach(a => { if (a.percent >= 100) return; if (mine && !effIds(a, r).includes(me)) return; items.push({ r, a }); }); });
     const t0 = d2n(today), within = (i, n) => d2n(i.a.end) > t0 && d2n(i.a.end) <= t0 + n;
     const groups = [
       ["Atrasadas", "al3", items.filter(i => i.a.end < today && !i.a.blocked)],
@@ -339,7 +359,7 @@
       const blk = a.blocked ? ` · <b class="orange">Bloqueada ${a.blockedSince ? lvlTxt(d2n(today) - d2n(a.blockedSince)) : ""}</b> ${a.blockReason ? "— " + esc(a.blockReason) : ""}` : "";
       return `<div class="hrow" data-r="${r.id}" data-a="${a.id}">
         <div class="hinfo"><b>${esc(r.code)}</b> · ${esc(r.title)} <small class="muted">${esc(clientName(r.clientId))}</small>
-          <div class="hact">${esc(a.name)} · ${esc(mname(a.assigneeId || r.assigneeId))} · vence ${a.end}${late}${blk}</div></div>
+          <div class="hact">${esc(a.name)} · ${esc(mnames(a, r))} · vence ${a.end}${late}${blk}</div></div>
         ${readOnly ? `<div class="hctl"><span class="pbar"><i style="width:${a.percent}%"></i><span>${a.percent}%</span></span></div>` : `<div class="hctl">
           <select class="hp" aria-label="Avance">${[0, 25, 50, 75, 100].map(p => `<option${p === a.percent ? " selected" : ""}>${p}</option>`).join("")}</select>
           <input class="hc" placeholder="Comentario (obligatorio si bloqueas)" aria-label="Comentario">
@@ -347,9 +367,9 @@
           <button class="primary hs">Registrar</button></div>`}
       </div>`;
     };
-    const stale = staleList().filter(r => !mine || r.assigneeId === me);
+    const stale = staleList().filter(r => !mine || ids(r).includes(me));
     let h = groups.map(([t, cls, list]) => `<div class="card hgroup"><h3 class="${cls}"><span class="hcount">${list.length}</span> ${t}</h3>${list.length ? list.sort((x, y) => x.a.end.localeCompare(y.a.end)).map(row).join("") : '<p class="muted">Nada por aquí 👌</p>'}</div>`).join("");
-    h += `<div class="card hgroup"><h3 class="alS"><span class="hcount">${stale.length}</span> Requerimientos sin actualizar (≥ ${STALE} días hábiles)</h3>` + (stale.length ? stale.map(r => `<div class="hrow stale" data-open="${r.id}"><div class="hinfo"><b>${esc(r.code)}</b> · ${esc(r.title)} <small class="muted">${esc(clientName(r.clientId))}</small><div class="hact">${esc(mname(r.assigneeId))} · último avance ${ldate(r.lastUpdate)} (hace ${staleDays(r)} días hábiles)</div></div><div class="hctl"><button class="ghost">Abrir</button></div></div>`).join("") : '<p class="muted">Todo al día 👌</p>') + "</div>";
+    h += `<div class="card hgroup"><h3 class="alS"><span class="hcount">${stale.length}</span> Requerimientos sin actualizar (≥ ${STALE} días hábiles)</h3>` + (stale.length ? stale.map(r => `<div class="hrow stale" data-open="${r.id}"><div class="hinfo"><b>${esc(r.code)}</b> · ${esc(r.title)} <small class="muted">${esc(clientName(r.clientId))}</small><div class="hact">${esc(mnames(r))} · último avance ${ldate(r.lastUpdate)} (hace ${staleDays(r)} días hábiles)</div></div><div class="hctl"><button class="ghost">Abrir</button></div></div>`).join("") : '<p class="muted">Todo al día 👌</p>') + "</div>";
     $("#hoyBody").innerHTML = h;
     $("#hoyBody").querySelectorAll("[data-open]").forEach(x => (x.onclick = () => openReq(x.dataset.open)));
     $("#hoyBody").querySelectorAll(".hrow[data-a] .hs").forEach(btn => (btn.onclick = () => {
@@ -392,11 +412,11 @@
     for (const r of list) {
       const [s, e] = span(r), p = progress(r), st = "st-" + (late(r) && r.status !== "Bloqueado" ? "Atrasado" : r.status.replace(" ", ""));
       const exp = !r.acts.length;
-      h += `<div class="g-row grp"><div class="g-label" data-open="${r.id}">${esc(r.code)} · ${esc(r.title)}<small>${r.type === "express" ? "Express · " : ""}${esc(mname(r.assigneeId))} · ${p}%</small></div>
+      h += `<div class="g-row grp"><div class="g-label" data-open="${r.id}">${esc(r.code)} · ${esc(r.title)}<small>${r.type === "express" ? "Express · " : ""}${esc(mnames(r))} · ${p}%</small></div>
         <div class="g-track" style="width:${W}px">${r.committedEnd && r.committedEnd !== e ? `<i class="cmark" style="left:${x(d2n(r.committedEnd) + 1)}px" title="Fecha comprometida ${r.committedEnd}"></i>` : ""}${exp ? bar("req", r.id, r, st, r.code, p, true) : bar("sum", r.id, { start: s, end: e }, "st-sum", "", p, false)}</div></div>`;
       if (!exp) for (const a of r.acts) {
         const ast = a.blocked ? "st-Bloqueado" : a.percent >= 100 ? "st-Completado" : a.end < today ? "st-Atrasado" : a.percent > 0 ? "st-Encurso" : "st-Pendiente";
-        h += `<div class="g-row"><div class="g-label" data-open="${r.id}">&nbsp;&nbsp;${esc(a.name)}<small>${esc(mname(a.assigneeId))}</small></div><div class="g-track" style="width:${W}px">${bar("act", r.id + "|" + a.id, a, ast, a.percent + "%", a.percent, true)}</div></div>`;
+        h += `<div class="g-row"><div class="g-label" data-open="${r.id}">&nbsp;&nbsp;${esc(a.name)}<small>${esc(mnames(a, r))}</small></div><div class="g-track" style="width:${W}px">${bar("act", r.id + "|" + a.id, a, ast, a.percent + "%", a.percent, true)}</div></div>`;
       }
     }
     h += `<div style="position:absolute;left:var(--lw);top:46px;bottom:0;width:${W}px;pointer-events:none"><div class="today" style="left:${x(d2n(today)) + pxDay / 2}px"></div></div></div>`;
@@ -443,7 +463,7 @@
   // ---------- Equipo ----------
   function renderTeam() {
     $("#memberTbl").innerHTML = `<thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Requerimientos activos</th><th></th></tr></thead><tbody>` +
-      store.members.map(m => `<tr><td>${esc(m.name)}</td><td>${esc(m.email)}</td><td>${pick(`data-mrole="${m.id}"`, m.roles, readOnly)}</td><td>${store.reqs.filter(r => r.assigneeId === m.id && r.status !== "Completado").length}</td>
+      store.members.map(m => `<tr><td>${esc(m.name)}</td><td>${esc(m.email)}</td><td>${pick(`data-mrole="${m.id}"`, m.roles, readOnly)}</td><td>${store.reqs.filter(r => ids(r).includes(m.id) && r.status !== "Completado").length}</td>
         <td>${readOnly ? "" : `<button data-rm="${m.id}" class="danger">Quitar</button>`}</td></tr>`).join("") + `</tbody>`;
     $("#memberTbl").querySelectorAll("[data-mrole]").forEach(cb => (cb.onchange = () => { const id = cb.dataset.mrole; store.members.find(m => m.id === id).roles = [...$("#memberTbl").querySelectorAll(`[data-mrole="${id}"]:checked`)].map(x => x.value); save(); render(); const d = document.querySelector(`[data-mrole="${id}"]`)?.closest("details"); if (d) d.open = true; }));
     { const keep = [...document.querySelectorAll("#memberRole input:checked")].map(x => x.value); $("#memberRole").innerHTML = pick('data-newrole', keep, readOnly).replace("Sin rol", "Roles…"); }
@@ -458,7 +478,8 @@
       const m = store.members.find(x => x.id === b.dataset.rm);
       if (!confirm(`¿Quitar a ${m.name}? Sus requerimientos quedarán sin responsable.`)) return;
       store.members = store.members.filter(x => x !== m);
-      store.reqs.forEach(r => { if (r.assigneeId === m.id) r.assigneeId = ""; r.acts.forEach(a => { if (a.assigneeId === m.id) a.assigneeId = ""; }); });
+      const drop = x => { if (ids(x).includes(m.id) || x.assigneeId === m.id) setIds(x, ids(x).filter(i => i !== m.id)); };
+      store.reqs.forEach(r => { drop(r); r.acts.forEach(drop); });
       save(); render();
     }));
   }
@@ -487,12 +508,18 @@
   // ---------- Requerimiento (ventana) ----------
   function fromTemplate(start) {
     let s = start || today;
-    return store.templates[(draft?.type || "trad") === "express" ? "express" : "trad"].map(a => { const x = { id: uid(), name: a.name, start: s, end: addDays(s, a.days - 1), percent: 0, assigneeId: draft?.assigneeId || "", blocked: false }; s = addDays(x.end, 1); return x; });
+    return store.templates[(draft?.type || "trad") === "express" ? "express" : "trad"].map(a => { const x = { id: uid(), name: a.name, start: s, end: addDays(s, a.days - 1), percent: 0, blocked: false }; setIds(x, ids(draft)); s = addDays(x.end, 1); return x; });
+  }
+  function renderReqPick() {
+    const box = $("#assigneePick"), open = box.querySelector("details")?.open;
+    box.innerHTML = memberPick("data-ra", ids(draft), readOnly);
+    if (open) box.querySelector("details").open = true;
+    box.querySelectorAll("[data-ra]").forEach(cb => (cb.onchange = () => { setIds(draft, [...box.querySelectorAll("[data-ra]:checked")].map(x => x.value)); renderReqPick(); }));
   }
   function openReq(id) {
     isNew = !id;
     draft = id ? JSON.parse(JSON.stringify(store.reqs.find(r => r.id === id)))
-      : { id: uid(), clientId: clientId !== "all" ? clientId : (store.clients[0]?.id || ""), code: "", title: "", type: "trad", assigneeId: store.members[0]?.id || "", status: "Pendiente", percent: 0, start: today, end: today, acts: [], comments: [] };
+      : { id: uid(), clientId: clientId !== "all" ? clientId : (store.clients[0]?.id || ""), code: "", title: "", type: "trad", assigneeId: store.members[0]?.id || "", assigneeIds: store.members[0] ? [store.members[0].id] : [], status: "Pendiente", percent: 0, start: today, end: today, acts: [], comments: [] };
     if (isNew) draft.acts = fromTemplate(today);
     if (!isNew && draft.type === "express" && !draft.acts.length) {           // requerimiento express antiguo: pasa a las 4 actividades
       draft.acts = fromTemplate(draft.start || today); const done = Math.round((draft.percent || 0) / 100 * draft.acts.length); draft.acts.forEach((x, i) => (x.percent = i < done ? 100 : 0));
@@ -500,8 +527,9 @@
     const f = $("#rform");
     $("#rTitle").textContent = isNew ? "Nuevo requerimiento" : `${draft.code} · ${draft.title}`;
     f.clientId.innerHTML = store.clients.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
-    f.assigneeId.innerHTML = `<option value="">— Sin asignar —</option>` + store.members.map(m => `<option value="${m.id}">${esc(m.name)}${m.roles.length ? " · " + esc(m.roles.join(", ")) : ""}</option>`).join("");
-    for (const k of ["clientId", "code", "title", "type", "assigneeId", "status", "percent", "start", "end"]) f[k].value = draft[k] ?? "";
+    setIds(draft, ids(draft));
+    renderReqPick();
+    for (const k of ["clientId", "code", "title", "type", "status", "percent", "start", "end"]) f[k].value = draft[k] ?? "";
     draft.deliverables ||= []; draft.metrics ||= {};
     if (isNew && !draft.deliverables.length) draft.deliverables = (draft.type === "express" ? ["Informe final"] : ["Plan de pruebas", "Evidencias (EVP)", "Informe final"]).map(n => ({ id: uid(), name: n, due: span(draft)[1], state: "pendiente", url: "" }));
     syncType(); renderActs(); renderDel(); renderMetrics(); renderThread(); renderCommit();
@@ -523,13 +551,12 @@
   }
   function readForm() {
     const f = $("#rform");
-    for (const k of ["clientId", "code", "title", "type", "assigneeId", "status", "start", "end"]) draft[k] = f[k].value;
+    for (const k of ["clientId", "code", "title", "type", "status", "start", "end"]) draft[k] = f[k].value;
     draft.percent = Math.min(100, Math.max(0, +f.percent.value || 0));
   }
   function renderActs() {
-    const opts = sel => `<option value="">—</option>` + store.members.map(m => `<option value="${m.id}"${m.id === sel ? " selected" : ""}>${esc(m.name)}</option>`).join("");
     $("#actTbl").innerHTML = `<thead><tr><th>Actividad</th><th>Resp.</th><th>Inicio</th><th>Fin</th><th>%</th><th>Bloq.</th><th></th></tr></thead><tbody>` +
-      draft.acts.map((a, i) => `<tr><td><textarea class="grow" rows="1" data-i="${i}" data-f="name">${esc(a.name)}</textarea></td><td><select data-i="${i}" data-f="assigneeId">${opts(a.assigneeId)}</select></td>
+      draft.acts.map((a, i) => `<tr><td><textarea class="grow" rows="1" data-i="${i}" data-f="name">${esc(a.name)}</textarea></td><td>${memberPick(`data-ai="${i}"`, ids(a), readOnly)}</td>
         <td><input type="date" data-i="${i}" data-f="start" value="${a.start}"></td><td><input type="date" data-i="${i}" data-f="end" value="${a.end}"></td>
         <td><select data-i="${i}" data-f="percent">${[0, 25, 50, 75, 100].map(p => `<option${p === a.percent ? " selected" : ""}>${p}</option>`).join("")}</select></td>
         <td><input type="checkbox" data-i="${i}" data-f="blocked"${a.blocked ? " checked" : ""}></td><td>${readOnly ? "" : `<button type="button" data-rm="${i}" class="danger">✕</button>`}</td></tr>`).join("") + `</tbody>`;
@@ -538,6 +565,10 @@
       el.disabled = readOnly;
       el.onchange = () => { const a = draft.acts[+el.dataset.i], f = el.dataset.f; a[f] = f === "blocked" ? el.checked : f === "percent" ? +el.value : el.value; if (f === "blocked") { a.blockedSince = el.checked ? (a.blockedSince || today) : ""; if (!el.checked) a.blockReason = ""; } };
     });
+    $("#actTbl").querySelectorAll("[data-ai]").forEach(cb => (cb.onchange = () => {
+      const det = cb.closest("details"), l = [...det.querySelectorAll("[data-ai]:checked")].map(x => x.value);
+      setIds(draft.acts[+cb.dataset.ai], l); det.querySelector("summary").textContent = l.length ? l.map(mname).join(", ") : "Sin asignar";
+    }));
     $("#actTbl").querySelectorAll("[data-rm]").forEach(b => (b.onclick = () => { draft.acts.splice(+b.dataset.rm, 1); renderActs(); }));
   }
   const DEL_ST = { pendiente: "Pendiente", entregado: "Entregado", validado: "Validado" };
@@ -577,7 +608,11 @@
     $("#newComment").value = ""; renderThread();
   }
   async function submitReq(e) {
-    e.preventDefault(); if (readOnly) return;
+    e.preventDefault();
+    if (readOnly) return say("Estás en modo solo lectura: no tienes permiso para guardar cambios.", 1);
+    try { await submitReqInner(); } catch (err) { console.error(err); say("No se pudo guardar: " + errText(err), 1); }
+  }
+  async function submitReqInner() {
     readForm();
     if (!draft.acts.length) return say("Agrega al menos una actividad.", 1);
     if (draft.acts.some(x => x.end < x.start)) return say("Hay una actividad con fecha de fin anterior al inicio.", 1);
@@ -746,8 +781,8 @@
     const row = (cl, req, act, who, s, e, pct, st, tipo, bold) => `<tr style="${bold ? "font-weight:bold;background:#eef2fb;" : ""}"><td>${esc(cl)}</td><td>${esc(req)}</td><td>${esc(act)}</td><td>${esc(who)}</td><td>${s}</td><td>${e}</td><td style="text-align:center">${pct}%</td><td style="color:${COL[st]};font-weight:bold">${st}</td><td>${tipo}</td>${cols.map(n => cell(n, d2n(s), d2n(e), pct, COL[st])).join("")}</tr>`;
     for (const r of list) {
       const [s, e] = span(r), p = progress(r), rs = reqSt(r), cn = clientName(r.clientId), nm = `${r.code} · ${r.title}`;
-      t += row(cn, nm, r.acts.length ? "(resumen)" : "—", mname(r.assigneeId), s, e, p, rs, r.type === "trad" ? "Tradicional" : "Express", true);
-      r.acts.forEach(a => (t += row("", "", a.name, mname(a.assigneeId), a.start, a.end, a.percent, actSt(a), "", false)));
+      t += row(cn, nm, r.acts.length ? "(resumen)" : "—", mnames(r), s, e, p, rs, r.type === "trad" ? "Tradicional" : "Express", true);
+      r.acts.forEach(a => (t += row("", "", a.name, mnames(a, r), a.start, a.end, a.percent, actSt(a), "", false)));
     }
     return t + "</table>";
   }
@@ -767,7 +802,7 @@
 
   function csv() {
     const rows = [["Cliente", "Código", "Título", "Tipo", "Responsable", "Estado", "Avance %", "Inicio", "Fin", "Comentarios"]].concat(visible().map(r => {
-      const [s, e] = span(r); return [clientName(r.clientId), r.code, r.title, r.type, mname(r.assigneeId), r.status, progress(r), s, e, r.comments.map(c => `${c.at.slice(0, 10)} ${c.by}: ${c.text}`).join(" | ")];
+      const [s, e] = span(r); return [clientName(r.clientId), r.code, r.title, r.type, mnames(r), r.status, progress(r), s, e, r.comments.map(c => `${c.at.slice(0, 10)} ${c.by}: ${c.text}`).join(" | ")];
     }));
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob(["﻿" + rows.map(r => r.map(c => `"${String(c ?? "").replace(/"/g, '""')}"`).join(",")).join("\r\n")], { type: "text/csv" }));
@@ -813,12 +848,13 @@
     if (!draft.acts.length || untouched || confirm(`Cambiar a ${label} reemplaza las actividades actuales por las de su plantilla. ¿Continuar?`)) { draft.acts = fromTemplate(draft.acts[0]?.start || today); renderActs(); }
     else { draft.type = prev; $("#rform").type.value = prev; syncType(); }
   };
-  $("#rform").assigneeId.onchange = () => { draft.assigneeId = $("#rform").assigneeId.value; };
-  $("#btnActAdd").onclick = () => { const last = draft.acts[draft.acts.length - 1]; const s = last ? addDays(last.end, 1) : today; draft.acts.push({ id: uid(), name: "Nueva actividad", start: s, end: s, percent: 0, assigneeId: draft.assigneeId, blocked: false }); renderActs(); };
+  $("#btnActAdd").onclick = () => { const last = draft.acts[draft.acts.length - 1]; const s = last ? addDays(last.end, 1) : today; draft.acts.push({ id: uid(), name: "Nueva actividad", start: s, end: s, percent: 0, assigneeId: draft.assigneeId, assigneeIds: [...ids(draft)], blocked: false }); renderActs(); };
   $("#btnDelAdd").onclick = () => { draft.deliverables.push({ id: uid(), name: "Nuevo entregable", due: span(draft)[1] || today, state: "pendiente", url: "" }); renderDel(); };
   $("#btnActTpl").onclick = () => { if (!draft.acts.length || confirm("Esto reemplaza las actividades actuales por la plantilla. ¿Continuar?")) { readForm(); draft.acts = fromTemplate(draft.acts[0]?.start || today); renderActs(); } };
   $("#btnComment").onclick = addComment;
   $("#rform").onsubmit = submitReq;
+  // campos inválidos (p. ej. Código/Título vacío, enlace mal escrito) bloquean el envío sin avisar si quedan fuera de vista
+  $("#rform").addEventListener("invalid", ev => { const l = ev.target.closest("label"); say(`Campo inválido: ${(l ? l.childNodes[0].textContent : ev.target.name || "").trim()} — ${ev.target.validationMessage}`, 1); }, true);
   $("#rCancel").onclick = $("#rClose").onclick = () => $("#dlg").close();
   $("#rDelete").onclick = () => { if (confirm("¿Eliminar este requerimiento y su seguimiento?")) { store.reqs = store.reqs.filter(r => r.id !== draft.id); save(); $("#dlg").close(); render(); } };
 

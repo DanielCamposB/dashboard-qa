@@ -80,7 +80,9 @@
   async function pushNow(retry = 0) {
     const s = pending; pending = null; if (!s) return;
     const mine = ops; ops = [];
-    const { data, error } = await sb.from("app_state").update({ data: s, version: version + 1 }).eq("id", 1).eq("version", version).select("version");
+    let res; try { res = await sb.from("app_state").update({ data: s, version: version + 1 }).eq("id", 1).eq("version", version).select("version"); }
+    catch (e) { ops = mine.concat(ops); return D.onError("No se pudo guardar (sin conexión): " + (e.message || e)); }
+    const { data, error } = res;
     if (error) { ops = mine.concat(ops); return D.onError("No se pudo guardar: " + error.message); }
     if (!data.length) {
       const fresh = await fetchState();
@@ -118,7 +120,7 @@
 
   D.save = function (s) {
     if (!remote) return localSave(s);
-    if (!canEdit) return;
+    if (!canEdit) return D.onError && D.onError("Tu cuenta no tiene permiso de edición: los cambios no se guardaron.");
     pending = s; clearTimeout(timer); timer = setTimeout(pushNow, 400);
   };
   D.getProfile = () => profile;
