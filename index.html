@@ -136,6 +136,7 @@
       <input name="email" type="email" placeholder="Correo (opcional)">
       <div id="memberRole"></div>
       <button class="primary" data-edit>Agregar</button>
+      <button type="button" id="btnRoleNew" data-edit title="Crear un rol nuevo (ej: Líder, QA Performance)">+ Nuevo rol</button>
     </form>
     <table id="memberTbl"></table>
   </div>
@@ -176,6 +177,7 @@
 </section>
 
 <section id="v-tpl" class="view" hidden>
+  <div class="toolbar"><button type="button" id="btnTplNew" class="primary" data-edit>+ Nueva plantilla</button><span class="muted">Crea plantillas propias además de Tradicional y Express.</span></div>
   <div class="card">
     <h2>Actividades base de QA Tradicional</h2>
     <p class="muted">Se copian a cada requerimiento tradicional nuevo (carta Gantt completa), y allí puedes ajustarlas. Cambiar esto no altera requerimientos ya creados.</p>
@@ -190,6 +192,7 @@
     <button class="tplAdd" data-k="express" data-edit>+ Actividad</button>
     <button class="tplReset" data-k="express" data-edit>Restaurar por defecto</button>
   </div>
+  <div id="tplCustom"></div>
 </section>
 
 <dialog id="imdlg" class="imdlg">
@@ -258,7 +261,7 @@
         <div class="row2" id="datesRow"><label>Inicio <input type="date" name="start"></label><label>Fin <input type="date" name="end"></label></div>
         <label id="pctRow">Avance % (express) <input type="number" name="percent" min="0" max="100" step="any"></label>
         <div id="actsBox">
-          <h3>Actividades <span class="star">*</span> <button type="button" id="btnActAdd" data-edit>+</button> <button type="button" id="btnActTpl" data-edit title="Reemplaza por la plantilla">Aplicar plantilla</button></h3>
+          <h3>Actividades <span class="star">*</span> <button type="button" id="btnActAdd" data-edit>+</button> <button type="button" id="btnActTpl" data-edit title="Reemplaza por la plantilla">Aplicar plantilla</button> <select id="tplPick" data-edit hidden title="Plantilla a aplicar"></select></h3>
           <table id="actTbl"></table>
         </div>
         <div id="delBox">

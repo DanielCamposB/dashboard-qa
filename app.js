@@ -499,24 +499,43 @@
       t.oninput = fit; fit();
     });
   }
+  function tplTable(tbl, t) {
+    tbl.innerHTML = `<thead><tr><th>#</th><th>Actividad</th><th>Duración (días)</th><th></th></tr></thead><tbody>` +
+      t.map((x, i) => `<tr><td>${i + 1}</td><td><textarea class="grow" rows="1" data-i="${i}" data-f="name">${esc(x.name)}</textarea></td><td><input type="number" min="1" data-i="${i}" data-f="days" value="${x.days}"></td>
+        <td><button data-up="${i}">↑</button> <button data-rm="${i}" class="danger">✕</button></td></tr>`).join("") + `</tbody>`;
+    tbl.querySelectorAll("input,textarea").forEach(i => { i.onchange = () => { t[+i.dataset.i][i.dataset.f] = i.dataset.f === "days" ? Math.max(1, +i.value) : i.value; save(); }; i.disabled = readOnly; });
+    tbl.querySelectorAll("[data-rm]").forEach(b => (b.onclick = () => { t.splice(+b.dataset.rm, 1); save(); renderTpl(); }));
+    tbl.querySelectorAll("[data-up]").forEach(b => (b.onclick = () => { const i = +b.dataset.up; if (i) { [t[i - 1], t[i]] = [t[i], t[i - 1]]; save(); renderTpl(); } }));
+    tbl.querySelectorAll("button").forEach(b => (b.hidden = readOnly));
+    autosize(tbl);
+  }
   function renderTpl() {
-    for (const k of ["trad", "express"]) {
-      const t = store.templates[k], tbl = $("#tplTbl-" + k);
-      tbl.innerHTML = `<thead><tr><th>#</th><th>Actividad</th><th>Duración (días)</th><th></th></tr></thead><tbody>` +
-        t.map((x, i) => `<tr><td>${i + 1}</td><td><textarea class="grow" rows="1" data-i="${i}" data-f="name">${esc(x.name)}</textarea></td><td><input type="number" min="1" data-i="${i}" data-f="days" value="${x.days}"></td>
-          <td><button data-up="${i}">↑</button> <button data-rm="${i}" class="danger">✕</button></td></tr>`).join("") + `</tbody>`;
-      tbl.querySelectorAll("input,textarea").forEach(i => { i.onchange = () => { t[+i.dataset.i][i.dataset.f] = i.dataset.f === "days" ? Math.max(1, +i.value) : i.value; save(); }; i.disabled = readOnly; });
-      tbl.querySelectorAll("[data-rm]").forEach(b => (b.onclick = () => { t.splice(+b.dataset.rm, 1); save(); renderTpl(); }));
-      tbl.querySelectorAll("[data-up]").forEach(b => (b.onclick = () => { const i = +b.dataset.up; if (i) { [t[i - 1], t[i]] = [t[i], t[i - 1]]; save(); renderTpl(); } }));
-      tbl.querySelectorAll("button").forEach(b => (b.hidden = readOnly));
-      autosize(tbl);
-    }
+    for (const k of ["trad", "express"]) tplTable($("#tplTbl-" + k), store.templates[k]);
+    const box = $("#tplCustom");
+    box.innerHTML = (store.customTpl || []).map((c, n) => `<div class="card" data-c="${n}">
+      <h2><input class="tplName" data-cn="${n}" value="${esc(c.name)}" aria-label="Nombre de la plantilla"${readOnly ? " disabled" : ""}></h2>
+      <p class="muted">Plantilla personalizada: elígela con "Aplicar plantilla" dentro de un requerimiento.</p>
+      <table id="tplTblC-${n}"></table>
+      <button class="tplCAdd" data-n="${n}" data-edit>+ Actividad</button>
+      <button class="tplCDel danger" data-n="${n}" data-edit>Eliminar plantilla</button></div>`).join("");
+    (store.customTpl || []).forEach((c, n) => tplTable($("#tplTblC-" + n), c.acts));
+    box.querySelectorAll(".tplName").forEach(i => (i.onchange = () => { const v = i.value.trim(); if (!v) { i.value = store.customTpl[+i.dataset.cn].name; return; } store.customTpl[+i.dataset.cn].name = v; save(); renderTplPick(); }));
+    box.querySelectorAll(".tplCAdd").forEach(b => (b.onclick = () => { store.customTpl[+b.dataset.n].acts.push({ name: "Nueva actividad", days: 1 }); save(); renderTpl(); }));
+    box.querySelectorAll(".tplCDel").forEach(b => (b.onclick = () => { const c = store.customTpl[+b.dataset.n]; if (!confirm(`¿Eliminar la plantilla "${c.name}"? Los requerimientos ya creados no cambian.`)) return; store.customTpl.splice(+b.dataset.n, 1); save(); renderTpl(); }));
+    box.querySelectorAll("[data-edit]").forEach(b => (b.hidden = readOnly));
+    renderTplPick();
+  }
+  function renderTplPick() {
+    const p = $("#tplPick"), keep = p.value;
+    p.innerHTML = `<option value="">Plantilla del tipo</option>` + (store.customTpl || []).map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
+    p.value = [...p.options].some(o => o.value === keep) ? keep : "";
+    p.hidden = !(store.customTpl || []).length || readOnly;
   }
 
   // ---------- Requerimiento (ventana) ----------
-  function fromTemplate(start) {
+  function fromTemplate(start, custom) {
     let s = start || today;
-    return store.templates[(draft?.type || "trad") === "express" ? "express" : "trad"].map(a => { const x = { id: uid(), name: a.name, start: s, end: addDays(s, a.days - 1), percent: 0, blocked: false }; setIds(x, ids(draft)); s = addDays(x.end, 1); return x; });
+    return (custom || store.templates[(draft?.type || "trad") === "express" ? "express" : "trad"]).map(a => { const x = { id: uid(), name: a.name, start: s, end: addDays(s, a.days - 1), percent: 0, blocked: false }; setIds(x, ids(draft)); s = addDays(x.end, 1); return x; });
   }
   function renderReqPick() {
     const box = $("#assigneePick"), open = box.querySelector("details")?.open;
@@ -545,6 +564,7 @@
     f.querySelectorAll("input,select,textarea").forEach(e => { if (e.id !== "newComment") e.disabled = readOnly; });
     $("#newComment").disabled = readOnly; $("#btnComment").hidden = readOnly; $("#rSave").hidden = readOnly; $("#rDelete").hidden = readOnly || isNew;
     f.querySelectorAll("[data-edit]").forEach(e => { if (e.id !== "rSave" && e.id !== "rDelete") e.hidden = readOnly; });
+    renderTplPick();
     $("#dlg").showModal(); autosize($("#actTbl"));
   }
   function renderCommit() {
@@ -856,6 +876,12 @@
   document.querySelectorAll("#zoom button").forEach(b => (b.onclick = () => { pxDay = +b.dataset.z; lsSet("qa-zoom", pxDay); renderGantt(); }));
   $("#memberForm").onsubmit = e => { e.preventDefault(); if (readOnly) return; const f = e.target; store.members.push({ id: uid(), name: f.name.value.trim(), email: f.email.value.trim(), roles: [...document.querySelectorAll("#memberRole input:checked")].map(x => x.value) }); f.reset(); save(); render(); };
   document.addEventListener("click", e => document.querySelectorAll(".rolepick[open]").forEach(d => { if (!d.contains(e.target)) d.open = false; }));
+  $("#btnRoleNew").onclick = () => {
+    if (readOnly) return;
+    const v = (prompt("Nombre del nuevo rol (ej: Líder, QA Performance):", "") || "").trim(); if (!v) return;
+    if (store.roles.some(r => r.toLowerCase() === v.toLowerCase())) return say("Ese rol ya existe.", 1);
+    store.roles.push(v); save(); render(); say(`Rol "${v}" creado ✓`);
+  };
   $("#roleForm").onsubmit = e => { e.preventDefault(); if (readOnly) return; const v = e.target.role.value.trim(); if (store.roles.includes(v)) return say("Ese rol ya existe.", 1); store.roles.push(v); e.target.reset(); save(); render(); };
   $("#clientSel").onchange = e => { clientId = e.target.value; lsSet("qa-client", clientId); render(); };
   $("#clientForm").onsubmit = e => { e.preventDefault(); if (readOnly) return; const v = e.target.name.value.trim(); if (!v) return; if (store.clients.some(c => c.name.toLowerCase() === v.toLowerCase())) return say("Ese cliente ya existe.", 1); const c = { id: uid(), name: v }; store.clients.push(c); e.target.reset(); save(); clientId = c.id; lsSet("qa-client", clientId); render(); say("Cliente creado y seleccionado ✓"); };
@@ -872,7 +898,16 @@
   $("#hoyExpand").onclick = () => setHoyAll(false); $("#hoyCollapse").onclick = () => setHoyAll(true);
   $("#btnActAdd").onclick = () => { const last = draft.acts[draft.acts.length - 1]; const s = last ? addDays(last.end, 1) : today; draft.acts.push({ id: uid(), name: "Nueva actividad", start: s, end: s, percent: 0, assigneeId: draft.assigneeId, assigneeIds: [...ids(draft)], blocked: false }); renderActs(); };
   $("#btnDelAdd").onclick = () => { draft.deliverables.push({ id: uid(), name: "Nuevo entregable", due: span(draft)[1] || today, state: "pendiente", url: "" }); renderDel(); };
-  $("#btnActTpl").onclick = () => { if (!draft.acts.length || confirm("Esto reemplaza las actividades actuales por la plantilla. ¿Continuar?")) { readForm(); draft.acts = fromTemplate(draft.acts[0]?.start || today); renderActs(); } };
+  $("#btnActTpl").onclick = () => {
+    const c = (store.customTpl || []).find(x => x.id === $("#tplPick").value);
+    if (!draft.acts.length || confirm(`Esto reemplaza las actividades actuales por la plantilla${c ? ` "${c.name}"` : ""}. ¿Continuar?`)) { readForm(); draft.acts = fromTemplate(draft.acts[0]?.start || today, c?.acts); renderActs(); }
+  };
+  $("#btnTplNew").onclick = () => {
+    if (readOnly) return;
+    const name = (prompt("Nombre de la nueva plantilla de actividades:", "") || "").trim(); if (!name) return;
+    if ((store.customTpl ||= []).some(c => c.name.toLowerCase() === name.toLowerCase())) return say("Ya existe una plantilla con ese nombre.", 1);
+    store.customTpl.push({ id: uid(), name, acts: [{ name: "Nueva actividad", days: 1 }] }); save(); renderTpl(); say("Plantilla creada ✓");
+  };
   $("#btnComment").onclick = addComment;
   $("#rform").onsubmit = submitReq;
   // campos inválidos (p. ej. Código/Título vacío, enlace mal escrito) bloquean el envío sin avisar si quedan fuera de vista

@@ -388,3 +388,10 @@ dialog{width:min(1240px,97vw)}
 .hgroup.closed .hbody{display:none}
 .hgroup.closed h3{margin-bottom:0}
 #v-hoy .toolbar .ghost{margin-left:6px}
+
+/* Plantillas personalizadas */
+#v-tpl .toolbar{margin-bottom:12px;gap:12px}
+#tplCustom .card{margin-top:16px}
+#tplCustom h2{margin:0 0 6px}
+.tplName{font:inherit;font-weight:700;font-size:inherit;width:min(520px,100%);color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:6px 10px}
+#tplPick{margin-left:6px;padding:6px 8px;font-size:12px}
