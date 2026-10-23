@@ -351,3 +351,21 @@ dialog{width:min(1240px,97vw)}
 #actTbl .rolepick{display:block;min-width:0;width:100%}
 #actTbl .rolepick summary{max-width:none;width:100%;box-sizing:border-box;min-height:34px;display:flex;align-items:center}
 #actTbl input[type=date]{min-width:128px}
+
+/* Tabla principal de requerimientos: más espacio por columna (en escritorio; en móvil se mantiene la vista de tarjetas) */
+@media(min-width:801px){
+  .tablewrap{overflow-x:auto}
+  #tbl{min-width:1750px}
+  #tbl th,#tbl td{padding:10px 14px}
+  #tbl td{line-height:1.9}
+  #tbl td[data-l="Cliente"]{min-width:130px}
+  #tbl td[data-l="Código"]{min-width:90px}
+  #tbl td[data-l="Requerimiento"]{min-width:230px}
+  #tbl td[data-l="Tipo"]{min-width:110px;white-space:nowrap}
+  #tbl td[data-l="Responsable"]{min-width:190px}
+  #tbl td[data-l="Estado"]{min-width:260px}
+  #tbl td[data-l="Avance"]{min-width:140px}
+  #tbl td[data-l="Entregables"]{min-width:120px}
+  #tbl td[data-l="Inicio"],#tbl td[data-l="Fin"]{min-width:120px;white-space:nowrap}
+  #tbl td[data-l="Último seguimiento"]{min-width:300px}
+}
