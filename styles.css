@@ -296,3 +296,39 @@ dialog{width:min(1240px,97vw)}
 .rform header .badge{flex:none}
 .usermenu{margin-left:auto}
 @media(max-width:760px){.usermenu{margin-left:0}}
+
+/* ---- Seguimiento diario ---- */
+.vtitle{margin:0;font-size:18px}
+.chk{display:flex;gap:8px;align-items:center;font-size:14px;color:var(--ink)}.chk input{width:auto;margin:0}
+.hoy{display:grid;gap:12px;padding:0 24px}
+.hgroup{margin:0!important;padding:14px 16px!important}
+.hgroup h3{margin:0 0 8px;font-size:15px;display:flex;align-items:center;gap:10px}
+.hcount{display:inline-grid;place-items:center;min-width:26px;height:26px;border-radius:99px;background:var(--line);font-size:13px}
+.hgroup h3.al3 .hcount{background:#d6394a;color:#fff}.hgroup h3.al2 .hcount{background:#e0541b;color:#fff}.hgroup h3.al1 .hcount{background:#e0861b;color:#fff}.hgroup h3.al0 .hcount{background:#c9a012;color:#fff}.hgroup h3.alS .hcount{background:#6a4fd6;color:#fff}
+.hrow{display:flex;gap:14px;justify-content:space-between;align-items:center;padding:10px 0;border-top:1px solid var(--line);flex-wrap:wrap}
+.hrow.stale{cursor:pointer}
+.hinfo{flex:1 1 320px;min-width:0}.hact{color:var(--mut);font-size:13px;margin-top:2px}
+.hact .red{color:#d6394a}.hact .orange{color:#e0861b}
+.hctl{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.hctl .hp{width:86px}.hctl .hc{width:260px}.hb{display:flex;gap:6px;align-items:center;font-size:13px;color:var(--ink);white-space:nowrap}.hb input{width:auto;margin:0}
+.alS{border-color:#6a4fd6;background:color-mix(in srgb,#6a4fd6 16%,transparent)}
+.cmark{position:absolute;top:0;bottom:0;width:0;border-left:2px dashed #b06bff;z-index:1;pointer-events:none}
+.commitBox{background:color-mix(in srgb,var(--acc) 8%,transparent);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:10px 0;font-size:13px}
+.commitBox details{margin-top:6px}.commitBox .dl{padding:6px 0;border-top:1px dashed var(--line)}
+@media(max-width:760px){.hoy{padding:0 12px}.hctl .hc{width:100%}.hctl{width:100%}.hctl .hs{flex:1}}
+.hgroup h3{background:none!important;border:0!important;padding:0!important;border-radius:0!important;cursor:default;font-size:15px}
+
+/* ---- Entregables, métricas, semáforo ---- */
+.dot{display:inline-block;width:11px;height:11px;border-radius:50%;vertical-align:middle;background:#8e9ab6}
+.dot.g{background:#2e9e6a}.dot.y{background:#e0b81b}.dot.r{background:#d6394a}.dot.d{background:#8e9ab6}
+.toolbar .g{color:#2e9e6a}.toolbar .y{color:#c9a012}.toolbar .r{color:#d6394a}
+#delTbl{table-layout:fixed;min-width:640px}#delTbl th:nth-child(1){width:30%}#delTbl th:nth-child(2){width:17%}#delTbl th:nth-child(3){width:15%}#delTbl th:nth-child(5){width:44px}
+#delTbl input,#delTbl select,#delTbl textarea{font-size:13px;padding:6px 8px;min-height:34px}
+#delBox,#metBox{margin-top:14px}
+.metGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px 10px}
+.metGrid label,#metBox .row2 label{margin:4px 0!important}
+#resCli th,#resCli td{white-space:nowrap}
+
+.imdlg{width:min(1000px,96vw)}
+#imTbl td,#imTbl th{white-space:nowrap}
+#imFile{margin:8px 0;width:100%}

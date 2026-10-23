@@ -1,7 +1,7 @@
 (async function () {
   const D = window.QA_DATA, { addDays, uid, iso } = D;
   const $ = s => document.querySelector(s);
-  const DAY = 86400000, today = iso(new Date());
+  const DAY = 86400000, today = iso(new Date(Date.now() - new Date().getTimezoneOffset() * 60000));
   const d2n = s => Math.round(Date.parse(s + "T00:00:00Z") / DAY);
   const n2d = n => new Date(n * DAY).toISOString().slice(0, 10);
   const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -108,6 +108,48 @@
   }
   const lastComment = r => r.comments.length ? r.comments[r.comments.length - 1] : null;
 
+  // ---------- seguimiento: última actualización, compromiso, check-in ----------
+  const STALE = 2;                                   // días hábiles sin actualizar para alertar
+  const bizDaysSince = day => { let n = d2n(day), c = 0; const t = d2n(today); while (n < t) { n++; const w = new Date(n * DAY).getUTCDay(); if (w !== 0 && w !== 6) c++; } return c; };
+  const ldate = s => (s ? iso(new Date(new Date(s).getTime() - new Date().getTimezoneOffset() * 60000)) : "");   // fecha local de un instante ISO
+  const staleDays = r => (r.status === "Completado" ? 0 : bizDaysSince(ldate(r.lastUpdate) || today));
+  const staleList = () => scoped().filter(r => staleDays(r) >= STALE).sort((x, y) => staleDays(y) - staleDays(x));
+  const authorName = () => lsGet("qa-author", "") || "Anónimo";
+  const commit = op => { op(store); D.queueOp(op); save(); };   // cambio pequeño que se puede re-aplicar si otra persona guardó antes
+  const slip = r => (r.committedEnd && span(r)[1] > r.committedEnd ? d2n(span(r)[1]) - d2n(r.committedEnd) : 0);
+  const delOverdue = r => r.deliverables.filter(d => d.state === "pendiente" && d.due && d.due < today);
+  const delDone = r => r.deliverables.filter(d => d.state !== "pendiente").length;
+  const M = r => r.metrics || {};
+  const openDef = r => ["crit", "high", "med", "low"].reduce((s, k) => s + (+M(r)[k] || 0), 0);
+  const pct = (n, d) => (d > 0 ? Math.round(((+n || 0) / d) * 100) : null);
+  function health(r) {                              // semáforo por requerimiento
+    if (r.status === "Completado") return { lvl: "d", why: ["Completado"] };
+    const why = []; let red = false, yel = false;
+    const worstLate = Math.max(daysLate(span(r)[1]), ...r.acts.filter(x => x.percent < 100).map(x => daysLate(x.end)));
+    if (worstLate >= 3) { red = true; why.push("atraso de " + lvlTxt(worstLate)); } else if (worstLate >= 1) { yel = true; why.push("atraso de " + lvlTxt(worstLate)); }
+    const bd = Math.max(0, ...r.acts.filter(x => x.blocked).map(x => (x.blockedSince ? d2n(today) - d2n(x.blockedSince) : 0)));
+    if (r.acts.some(x => x.blocked) || r.status === "Bloqueado") { if (bd >= 3) { red = true; why.push("bloqueado hace " + lvlTxt(bd)); } else { yel = true; why.push("bloqueado"); } }
+    const od = delOverdue(r); if (od.length) { const dd = Math.max(...od.map(x => daysLate(x.due))); if (dd >= 3) red = true; else yel = true; why.push(od.length + " entregable(s) vencido(s)"); }
+    const sl = slip(r); if (sl >= 5) { red = true; why.push("plazo +" + sl + " d vs compromiso"); } else if (sl >= 1) { yel = true; why.push("plazo +" + sl + " d vs compromiso"); }
+    if (staleDays(r) >= STALE) { yel = true; why.push("sin actualizar " + staleDays(r) + " días hábiles"); }
+    return { lvl: red ? "r" : yel ? "y" : "g", why };
+  }
+  function statusSync(r, nowIso) {
+    const p = progress(r), anyB = r.acts.some(x => x.blocked); r.percent = p; r.lastUpdate = nowIso;
+    if (p >= 100) { if (r.status !== "Completado") { r.status = "Completado"; r.completedAt = today; } return; }
+    if (r.status === "Completado") r.status = "En curso";
+    if (anyB) r.status = "Bloqueado"; else if (r.status === "Bloqueado") r.status = "En curso"; else if (p > 0 && r.status === "Pendiente") r.status = "En curso";
+  }
+  function askReason(msg) {
+    return new Promise(res => {
+      const d = $("#rsdlg"); $("#rsMsg").textContent = msg; $("#rsText").value = ""; $("#rsErr").hidden = true;
+      const done = v => { d.close(); res(v); };
+      $("#rsOk").onclick = () => { const v = $("#rsText").value.trim(); if (!v) { $("#rsErr").hidden = false; return; } done(v); };
+      $("#rsCancel").onclick = () => done(null); d.oncancel = e => { e.preventDefault(); done(null); };
+      d.showModal(); $("#rsText").focus();
+    });
+  }
+
   // ---------- navegación / modo ----------
   function setView(v) {
     document.querySelectorAll(".view").forEach(e => (e.hidden = e.id !== "v-" + v));
@@ -210,7 +252,7 @@
     refreshUserMenu();
     $("#mode").value = readOnly ? "read" : "edit";
     document.body.classList.toggle("ro", readOnly);
-    $("#btnNew").hidden = readOnly; $("#btnImport").hidden = readOnly;
+    $("#btnNew").hidden = readOnly; $("#btnImport").hidden = readOnly; $("#btnImportXls").hidden = readOnly;
     $("#actionbar").classList.toggle("ro", readOnly);
     document.querySelectorAll("[data-edit]").forEach(e => (e.hidden = readOnly));
   }
@@ -223,12 +265,13 @@
   }
   function renderDash() {
     const all = scoped(), c = f => all.filter(f).length;
-    const al = alertsList();
-    $("#alerts").innerHTML = al.length ? `<details open><summary><b>${al.length} alerta${al.length > 1 ? "s" : ""} de atraso</b></summary>` +
-      al.map(a => `<div class="al al${lvl(a.d)}" data-id="${a.r.id}"><b>${lvlTxt(a.d)} de atraso</b> · ${esc(a.r.code)} ${esc(a.r.title)} · <span>${esc(a.what)}</span> · ${esc(mname(a.r.assigneeId))}</div>`).join("") + "</details>" : "";
+    const al = alertsList(), st = staleList(), total = al.length + st.length;
+    $("#alerts").innerHTML = total ? `<details open><summary><b>${total} alerta${total > 1 ? "s" : ""}</b> · ${al.length} de atraso · ${st.length} sin actualizar</summary>` +
+      al.map(x => `<div class="al al${lvl(x.d)}" data-id="${x.r.id}"><b>${lvlTxt(x.d)} de atraso</b> · ${esc(x.r.code)} ${esc(x.r.title)} · <span>${esc(x.what)}</span> · ${esc(mname(x.r.assigneeId))}</div>`).join("") +
+      st.map(r => `<div class="al alS" data-id="${r.id}"><b>Sin actualizar hace ${staleDays(r)} días hábiles</b> · ${esc(r.code)} ${esc(r.title)} · <span>Último avance: ${ldate(r.lastUpdate)}</span> · ${esc(mname(r.assigneeId))}</div>`).join("") + "</details>" : "";
     $("#alerts").querySelectorAll(".al").forEach(x => (x.onclick = () => openReq(x.dataset.id)));
     $("#kpis").innerHTML = [["Requerimientos", all.length], ["QA Express", c(r => r.type === "express")], ["QA Tradicional", c(r => r.type === "trad")],
-      ["En curso", c(r => r.status === "En curso")], ["Bloqueados", c(r => r.status === "Bloqueado")], ["Atrasados", c(late)], ["Completados", c(r => r.status === "Completado")]]
+      ["En curso", c(r => r.status === "En curso")], ["Bloqueados", c(r => r.status === "Bloqueado")], ["Atrasados", c(late)], ["Sin actualizar", st.length], ["Entregables vencidos", all.reduce((n, r) => n + delOverdue(r).length, 0)], ["Completados", c(r => r.status === "Completado")]]
       .map(([l, v]) => `<div class="kpi"><b>${v}</b><span>${l}</span></div>`).join("");
     const keep = $("#fAssignee").value;
     $("#fAssignee").innerHTML = `<option value="">Todo el equipo</option>` + store.members.map(m => `<option value="${m.id}">${esc(m.name)}</option>`).join("");
@@ -237,17 +280,94 @@
     $("#fRole").innerHTML = `<option value="">Todos los roles</option>` + store.roles.map(r => `<option>${esc(r)}</option>`).join("");
     $("#fRole").value = kr;
     const rows = visible().sort((a, b) => span(a)[1].localeCompare(span(b)[1]));
-    $("#tbl").innerHTML = `<thead><tr>${clientId === "all" ? "<th>Cliente</th>" : ""}<th>Código</th><th>Requerimiento</th><th>Tipo</th><th>Responsable</th><th>Estado</th><th>Avance</th><th>Inicio</th><th>Fin</th><th>Último seguimiento</th></tr></thead><tbody>` +
+    $("#tbl").innerHTML = `<thead><tr>${clientId === "all" ? "<th>Cliente</th>" : ""}<th>Código</th><th>Requerimiento</th><th>Tipo</th><th>Responsable</th><th>Estado</th><th>Avance</th><th>Entregables</th><th>Inicio</th><th>Fin</th><th>Último seguimiento</th></tr></thead><tbody>` +
       (rows.map(r => {
         const p = progress(r), [s, e] = span(r), lc = lastComment(r);
         return `<tr data-id="${r.id}">${clientId === "all" ? `<td>${esc(clientName(r.clientId))}</td>` : ""}<td><b>${esc(r.code)}</b></td><td>${esc(r.title)}</td>
           <td><span class="pill ${r.type}">${r.type === "trad" ? "Tradicional" : "Express"}</span></td><td>${esc(mname(r.assigneeId))}<br><small class="muted">${esc(memberRoles(r.assigneeId).join(", "))}</small></td>
-          <td><span class="st st-${r.status.replace(" ", "")}">${r.status}</span>${late(r) ? ` <span class="st al${lvl(daysLate(span(r)[1]))}">Atrasado ${lvlTxt(daysLate(span(r)[1]))}</span>` : ""}</td>
-          <td><div class="pbar"><i style="width:${p}%"></i><span>${p}%</span></div></td><td>${s}</td><td>${e}</td>
+          <td><span class="dot ${health(r).lvl}" title="${esc(health(r).why.join(" · ") || "En plazo")}"></span> <span class="st st-${r.status.replace(" ", "")}">${r.status}</span>${late(r) ? ` <span class="st al${lvl(daysLate(span(r)[1]))}">Atrasado ${lvlTxt(daysLate(span(r)[1]))}</span>` : ""}</td>
+          <td><div class="pbar"><i style="width:${p}%"></i><span>${p}%</span></div></td><td>${r.deliverables.length ? `${delDone(r)}/${r.deliverables.length}${delOverdue(r).length ? ` <span class="st al3">${delOverdue(r).length} vencido(s)</span>` : ""}` : "—"}</td><td>${s}</td><td>${e}${slip(r) ? ` <span class="st al1" title="Comprometida: ${r.committedEnd}">+${slip(r)} d</span>` : ""}</td>
           <td class="lc">${lc ? `<small>${lc.at.slice(0, 10)} · ${esc(lc.by)}</small><br>${esc(lc.text.slice(0, 90))}` : '<small class="muted">Sin comentarios</small>'} <small class="muted">(${r.comments.length})</small></td></tr>`;
-      }).join("") || `<tr><td colspan="9" class="muted" style="padding:20px">Sin requerimientos. Usa "+ Requerimiento".</td></tr>`) + `</tbody>`;
+      }).join("") || `<tr><td colspan="11" class="muted" style="padding:20px">Sin requerimientos. Usa "+ Requerimiento".</td></tr>`) + `</tbody>`;
     const hs = [...$("#tbl").querySelectorAll("thead th")].map(t => t.textContent);   // etiquetas para la vista de tarjetas en móvil
     $("#tbl").querySelectorAll("tbody tr[data-id]").forEach(tr => { [...tr.children].forEach((td, i) => (td.dataset.l = hs[i] || "")); tr.onclick = () => openReq(tr.dataset.id); });
+  }
+
+  // ---------- Resumen ejecutivo ----------
+  function renderResumen() {
+    const all = scoped(), act = all.filter(r => r.status !== "Completado"), hs = act.map(r => ({ r, h: health(r) }));
+    const cnt = l => hs.filter(x => x.h.lvl === l).length;
+    const done = all.filter(r => r.status === "Completado" && r.completedAt), onTime = done.filter(r => r.completedAt <= (r.committedEnd || r.end)).length;
+    const ex = pct(all.reduce((n, r) => n + (+M(r).executed || 0), 0), all.reduce((n, r) => n + (+M(r).designed || 0), 0));
+    const au = pct(all.reduce((n, r) => n + (+M(r).automated || 0), 0), all.reduce((n, r) => n + (+M(r).designed || 0), 0));
+    const crit = all.filter(r => r.status !== "Completado").reduce((n, r) => n + (+M(r).crit || 0) + (+M(r).high || 0), 0);
+    $("#resKpis").innerHTML = [["En curso", act.length], ["🟢 En plazo", cnt("g")], ["🟡 En riesgo", cnt("y")], ["🔴 Críticos", cnt("r")],
+      ["Cumplimiento de plazos", done.length ? pct(onTime, done.length) + "%" : "—"], ["Entregables vencidos", act.reduce((n, r) => n + delOverdue(r).length, 0)],
+      ["Ejecución de casos", ex !== null ? ex + "%" : "—"], ["Automatizado", au !== null ? au + "%" : "—"], ["Defectos críticos/altos", crit]]
+      .map(([l, v]) => `<div class="kpi"><b>${v}</b><span>${l}</span></div>`).join("");
+    const rows = store.clients.filter(c => clientId === "all" || c.id === clientId).map(c => {
+      const rs = store.reqs.filter(r => r.clientId === c.id), ac = rs.filter(r => r.status !== "Completado"), h = ac.map(health);
+      const d = rs.reduce((n, r) => n + (+M(r).designed || 0), 0), e = rs.reduce((n, r) => n + (+M(r).executed || 0), 0), au2 = rs.reduce((n, r) => n + (+M(r).automated || 0), 0);
+      return `<tr><td><b>${esc(c.name)}</b></td><td>${rs.length}</td><td>${ac.length}</td><td><span class="dot g"></span> ${h.filter(x => x.lvl === "g").length}</td><td><span class="dot y"></span> ${h.filter(x => x.lvl === "y").length}</td><td><span class="dot r"></span> ${h.filter(x => x.lvl === "r").length}</td>
+        <td>${ac.filter(late).length}</td><td>${ac.filter(r => staleDays(r) >= STALE).length}</td><td>${ac.reduce((n, r) => n + delOverdue(r).length, 0)}</td><td>${pct(e, d) !== null ? pct(e, d) + "%" : "—"}</td><td>${pct(au2, d) !== null ? pct(au2, d) + "%" : "—"}</td><td>${ac.reduce((n, r) => n + openDef(r), 0)}</td></tr>`;
+    }).join("");
+    $("#resCli").innerHTML = "<thead><tr><th>Cliente</th><th>Total</th><th>En curso</th><th>Verde</th><th>Amarillo</th><th>Rojo</th><th>Atrasados</th><th>Sin actualizar</th><th>Entreg. vencidos</th><th>Ejecución</th><th>Automatizado</th><th>Defectos abiertos</th></tr></thead><tbody>" + (rows || '<tr><td class="muted">Sin clientes</td></tr>') + "</tbody>";
+    const att = hs.filter(x => x.h.lvl !== "g").sort((x, y) => (x.h.lvl === "r" ? 0 : 1) - (y.h.lvl === "r" ? 0 : 1) || span(x.r)[1].localeCompare(span(y.r)[1]));
+    $("#resAtt").innerHTML = att.length ? att.map(({ r, h }) => `<div class="hrow" data-open="${r.id}"><div class="hinfo"><span class="dot ${h.lvl}"></span> <b>${esc(r.code)}</b> · ${esc(r.title)} <small class="muted">${esc(clientName(r.clientId))} · ${esc(mname(r.assigneeId))} · plazo ${span(r)[1]}</small>
+      <div class="hact">${esc(h.why.join(" · "))}</div></div><div class="hctl"><button class="ghost">Abrir</button></div></div>`).join("") : '<p class="muted">Nada en riesgo. Todo en plazo 👌</p>';
+    $("#resAtt").querySelectorAll("[data-open]").forEach(x => (x.onclick = () => openReq(x.dataset.open)));
+  }
+
+  // ---------- Hoy ----------
+  const myMemberId = () => { const em = (boot.user || "").toLowerCase(); return em ? (store.members.find(m => m.email && m.email.toLowerCase() === em)?.id || "") : ""; };
+  function renderHoy() {
+    $("#hoyDate").textContent = new Date().toLocaleDateString("es", { weekday: "long", day: "numeric", month: "long" });
+    const mineOn = $("#hoyMine").checked, me = myMemberId(), mine = mineOn && me;
+    $("#hoyMineNote").textContent = mineOn && !me ? "No encontré tu correo en la pestaña Equipo; se muestran todas." : "";
+    const items = [];
+    scoped().forEach(r => { if (r.status === "Completado") return; r.acts.forEach(a => { if (a.percent >= 100) return; if (mine && (a.assigneeId || r.assigneeId) !== me) return; items.push({ r, a }); }); });
+    const t0 = d2n(today), within = (i, n) => d2n(i.a.end) > t0 && d2n(i.a.end) <= t0 + n;
+    const groups = [
+      ["Atrasadas", "al3", items.filter(i => i.a.end < today && !i.a.blocked)],
+      ["Vencen hoy", "al1", items.filter(i => i.a.end === today && !i.a.blocked)],
+      ["Bloqueadas", "al2", items.filter(i => i.a.blocked)],
+      ["En ejecución hoy", "", items.filter(i => i.a.start <= today && i.a.end > today && !within(i, 3) && !i.a.blocked)],
+      ["Vencen en los próximos 3 días", "al0", items.filter(i => within(i, 3) && !i.a.blocked)]
+    ];
+    const row = ({ r, a }) => {
+      const late = a.end < today ? ` · <b class="red">${lvlTxt(daysLate(a.end))} de atraso</b>` : "";
+      const blk = a.blocked ? ` · <b class="orange">Bloqueada ${a.blockedSince ? lvlTxt(d2n(today) - d2n(a.blockedSince)) : ""}</b> ${a.blockReason ? "— " + esc(a.blockReason) : ""}` : "";
+      return `<div class="hrow" data-r="${r.id}" data-a="${a.id}">
+        <div class="hinfo"><b>${esc(r.code)}</b> · ${esc(r.title)} <small class="muted">${esc(clientName(r.clientId))}</small>
+          <div class="hact">${esc(a.name)} · ${esc(mname(a.assigneeId || r.assigneeId))} · vence ${a.end}${late}${blk}</div></div>
+        ${readOnly ? `<div class="hctl"><span class="pbar"><i style="width:${a.percent}%"></i><span>${a.percent}%</span></span></div>` : `<div class="hctl">
+          <select class="hp" aria-label="Avance">${[0, 25, 50, 75, 100].map(p => `<option${p === a.percent ? " selected" : ""}>${p}</option>`).join("")}</select>
+          <input class="hc" placeholder="Comentario (obligatorio si bloqueas)" aria-label="Comentario">
+          <label class="hb"><input type="checkbox" class="hbk"${a.blocked ? " checked" : ""}> Bloqueada</label>
+          <button class="primary hs">Registrar</button></div>`}
+      </div>`;
+    };
+    const stale = staleList().filter(r => !mine || r.assigneeId === me);
+    let h = groups.map(([t, cls, list]) => `<div class="card hgroup"><h3 class="${cls}"><span class="hcount">${list.length}</span> ${t}</h3>${list.length ? list.sort((x, y) => x.a.end.localeCompare(y.a.end)).map(row).join("") : '<p class="muted">Nada por aquí 👌</p>'}</div>`).join("");
+    h += `<div class="card hgroup"><h3 class="alS"><span class="hcount">${stale.length}</span> Requerimientos sin actualizar (≥ ${STALE} días hábiles)</h3>` + (stale.length ? stale.map(r => `<div class="hrow stale" data-open="${r.id}"><div class="hinfo"><b>${esc(r.code)}</b> · ${esc(r.title)} <small class="muted">${esc(clientName(r.clientId))}</small><div class="hact">${esc(mname(r.assigneeId))} · último avance ${ldate(r.lastUpdate)} (hace ${staleDays(r)} días hábiles)</div></div><div class="hctl"><button class="ghost">Abrir</button></div></div>`).join("") : '<p class="muted">Todo al día 👌</p>') + "</div>";
+    $("#hoyBody").innerHTML = h;
+    $("#hoyBody").querySelectorAll("[data-open]").forEach(x => (x.onclick = () => openReq(x.dataset.open)));
+    $("#hoyBody").querySelectorAll(".hrow[data-a] .hs").forEach(btn => (btn.onclick = () => {
+      const rowEl = btn.closest(".hrow"), rid = rowEl.dataset.r, aid = rowEl.dataset.a;
+      const pct = +rowEl.querySelector(".hp").value, blocked = rowEl.querySelector(".hbk").checked, text = rowEl.querySelector(".hc").value.trim();
+      if (blocked && !text && !store.reqs.find(x => x.id === rid)?.acts.find(x => x.id === aid)?.blockReason) return say("Indica el motivo del bloqueo en el comentario.", 1);
+      const by = authorName(), at = new Date().toISOString(), cid = uid();
+      commit(s => {
+        const r = s.reqs.find(x => x.id === rid), x = r?.acts.find(y => y.id === aid); if (!x) return;
+        const before = x.percent, wasB = x.blocked;
+        x.percent = pct; x.blocked = blocked;
+        if (blocked) { if (!wasB || !x.blockedSince) x.blockedSince = today; if (text) x.blockReason = text; } else { x.blockReason = ""; x.blockedSince = ""; }
+        const msg = text || (before !== pct ? `Avance ${before}% → ${pct}%` : (blocked !== wasB ? (blocked ? "Bloqueada" : "Desbloqueada") : ""));
+        if (msg && !r.comments.some(k => k.id === cid)) r.comments.push({ id: cid, at, by, text: `[${x.name} · ${pct}%${blocked ? " · BLOQUEADA" : ""}] ${msg}` });
+        statusSync(r, at);
+      });
+      say("Registrado ✓"); render();
+    }));
   }
 
   // ---------- Gantt ----------
@@ -273,7 +393,7 @@
       const [s, e] = span(r), p = progress(r), st = "st-" + (late(r) && r.status !== "Bloqueado" ? "Atrasado" : r.status.replace(" ", ""));
       const exp = !r.acts.length;
       h += `<div class="g-row grp"><div class="g-label" data-open="${r.id}">${esc(r.code)} · ${esc(r.title)}<small>${r.type === "express" ? "Express · " : ""}${esc(mname(r.assigneeId))} · ${p}%</small></div>
-        <div class="g-track" style="width:${W}px">${exp ? bar("req", r.id, r, st, r.code, p, true) : bar("sum", r.id, { start: s, end: e }, "st-sum", "", p, false)}</div></div>`;
+        <div class="g-track" style="width:${W}px">${r.committedEnd && r.committedEnd !== e ? `<i class="cmark" style="left:${x(d2n(r.committedEnd) + 1)}px" title="Fecha comprometida ${r.committedEnd}"></i>` : ""}${exp ? bar("req", r.id, r, st, r.code, p, true) : bar("sum", r.id, { start: s, end: e }, "st-sum", "", p, false)}</div></div>`;
       if (!exp) for (const a of r.acts) {
         const ast = a.blocked ? "st-Bloqueado" : a.percent >= 100 ? "st-Completado" : a.end < today ? "st-Atrasado" : a.percent > 0 ? "st-Encurso" : "st-Pendiente";
         h += `<div class="g-row"><div class="g-label" data-open="${r.id}">&nbsp;&nbsp;${esc(a.name)}<small>${esc(mname(a.assigneeId))}</small></div><div class="g-track" style="width:${W}px">${bar("act", r.id + "|" + a.id, a, ast, a.percent + "%", a.percent, true)}</div></div>`;
@@ -302,10 +422,19 @@
         if (mode === "l") ns = Math.min(ns, e0); if (mode === "r") ne = Math.max(ne, s0);
         bar.style.left = l0 + (ns - s0) * pxDay + "px"; bar.style.width = w0 + ((ne - ns) - (e0 - s0)) * pxDay + "px"; bar._ns = ns; bar._ne = ne;
       };
-      const up = () => {
+      const up = async () => {
         bar.removeEventListener("pointermove", mv); bar.removeEventListener("pointerup", up);
         if (!bar._moved) return;
-        t.start = n2d(bar._ns); t.end = n2d(bar._ne); save(); say("Guardado ✓"); render();
+        const [rid, aid] = bar.dataset.id.split("|"), ns = n2d(bar._ns), ne = n2d(bar._ne), r = store.reqs.find(x => x.id === rid);
+        const prev = { start: t.start, end: t.end }, oldEnd = span(r)[1];
+        t.start = ns; t.end = ne; const newEnd = span(r)[1]; t.start = prev.start; t.end = prev.end;      // simulación
+        let why = "";
+        if (newEnd !== oldEnd) { why = await askReason(`${r.code}: el plazo del requerimiento cambia de ${oldEnd} a ${newEnd}.`); if (why === null) { render(); setTimeout(() => (bar._moved = false), 0); return; } }
+        const by = authorName(), at = new Date().toISOString();
+        commit(s => { const rr = s.reqs.find(x => x.id === rid); if (!rr) return; const tt = bar.dataset.k === "act" ? rr.acts.find(x => x.id === aid) : rr; if (!tt) return;
+          const before = span(rr)[1]; tt.start = ns; tt.end = ne; const [s0, e0] = span(rr); rr.start = s0; rr.end = e0; rr.lastUpdate = at;
+          if (why && e0 !== before) rr.dateLog.push({ at, by, from: before, to: e0, reason: why }); });
+        say("Guardado ✓"); render(); setTimeout(() => (bar._moved = false), 0);
       };
       bar.addEventListener("pointermove", mv); bar.addEventListener("pointerup", up);
     });
@@ -373,12 +502,21 @@
     f.clientId.innerHTML = store.clients.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
     f.assigneeId.innerHTML = `<option value="">— Sin asignar —</option>` + store.members.map(m => `<option value="${m.id}">${esc(m.name)}${m.roles.length ? " · " + esc(m.roles.join(", ")) : ""}</option>`).join("");
     for (const k of ["clientId", "code", "title", "type", "assigneeId", "status", "percent", "start", "end"]) f[k].value = draft[k] ?? "";
-    syncType(); renderActs(); renderThread();
+    draft.deliverables ||= []; draft.metrics ||= {};
+    if (isNew && !draft.deliverables.length) draft.deliverables = (draft.type === "express" ? ["Informe final"] : ["Plan de pruebas", "Evidencias (EVP)", "Informe final"]).map(n => ({ id: uid(), name: n, due: span(draft)[1], state: "pendiente", url: "" }));
+    syncType(); renderActs(); renderDel(); renderMetrics(); renderThread(); renderCommit();
     $("#newComment").value = "";
     f.querySelectorAll("input,select,textarea").forEach(e => { if (e.id !== "newComment") e.disabled = readOnly; });
     $("#newComment").disabled = readOnly; $("#btnComment").hidden = readOnly; $("#rSave").hidden = readOnly; $("#rDelete").hidden = readOnly || isNew;
     f.querySelectorAll("[data-edit]").forEach(e => { if (e.id !== "rSave" && e.id !== "rDelete") e.hidden = readOnly; });
     $("#dlg").showModal(); autosize($("#actTbl"));
+  }
+  function renderCommit() {
+    const b = $("#commitBox"); if (isNew || !draft.committedEnd) { b.hidden = true; return; }
+    const cur = span(draft)[1], d = d2n(cur) - d2n(draft.committedEnd);
+    b.hidden = false;
+    b.innerHTML = `<b>Compromiso:</b> ${draft.committedEnd} · <b>Plazo actual:</b> ${cur} ${d > 0 ? `<span class="st al1">+${d} días</span>` : d < 0 ? `<span class="st st-Completado">${d} días</span>` : '<span class="st st-Completado">en plazo</span>'}` +
+      (draft.dateLog.length ? `<details><summary>Historial de cambios de plazo (${draft.dateLog.length})</summary>` + draft.dateLog.map(l => `<div class="dl"><small>${new Date(l.at).toLocaleString("es")} · <b>${esc(l.by)}</b></small><br>${l.from} → ${l.to}: ${esc(l.reason)}</div>`).join("") + "</details>" : "");
   }
   function syncType() {
     $("#actsBox").hidden = false; $("#pctRow").hidden = true; $("#datesRow").hidden = true;
@@ -398,9 +536,33 @@
     autosize($("#actTbl"));
     $("#actTbl").querySelectorAll("[data-f]").forEach(el => {
       el.disabled = readOnly;
-      el.onchange = () => { const a = draft.acts[+el.dataset.i], f = el.dataset.f; a[f] = f === "blocked" ? el.checked : f === "percent" ? +el.value : el.value; };
+      el.onchange = () => { const a = draft.acts[+el.dataset.i], f = el.dataset.f; a[f] = f === "blocked" ? el.checked : f === "percent" ? +el.value : el.value; if (f === "blocked") { a.blockedSince = el.checked ? (a.blockedSince || today) : ""; if (!el.checked) a.blockReason = ""; } };
     });
     $("#actTbl").querySelectorAll("[data-rm]").forEach(b => (b.onclick = () => { draft.acts.splice(+b.dataset.rm, 1); renderActs(); }));
+  }
+  const DEL_ST = { pendiente: "Pendiente", entregado: "Entregado", validado: "Validado" };
+  function renderDel() {
+    const t = $("#delTbl");
+    t.innerHTML = `<thead><tr><th>Entregable</th><th>Vence</th><th>Estado</th><th>Enlace (SharePoint / DevOps)</th><th></th></tr></thead><tbody>` +
+      draft.deliverables.map((d, i) => `<tr><td><textarea class="grow" rows="1" data-di="${i}" data-df="name">${esc(d.name)}</textarea></td><td><input type="date" data-di="${i}" data-df="due" value="${d.due || ""}"></td>
+        <td><select data-di="${i}" data-df="state">${Object.entries(DEL_ST).map(([k, v]) => `<option value="${k}"${k === d.state ? " selected" : ""}>${v}</option>`).join("")}</select></td>
+        <td><input type="url" data-di="${i}" data-df="url" value="${esc(d.url || "")}" placeholder="https://..."></td>
+        <td>${readOnly ? "" : `<button type="button" class="danger" data-drm="${i}">✕</button>`}</td></tr>`).join("") + "</tbody>";
+    autosize(t);
+    t.querySelectorAll("[data-df]").forEach(el => { el.disabled = readOnly; el.onchange = () => { const d = draft.deliverables[+el.dataset.di], f = el.dataset.df; d[f] = el.value; if (f === "state") d.deliveredAt = el.value === "pendiente" ? "" : (d.deliveredAt || today); }; });
+    t.querySelectorAll("[data-drm]").forEach(b => (b.onclick = () => { draft.deliverables.splice(+b.dataset.drm, 1); renderDel(); }));
+  }
+  function renderMetrics() {
+    const m = draft.metrics;
+    $("#metBox").querySelectorAll("[data-m]").forEach(el => {
+      el.value = m[el.dataset.m] ?? ""; el.disabled = readOnly;
+      el.oninput = () => { m[el.dataset.m] = el.type === "number" ? (el.value === "" ? "" : Math.max(0, +el.value)) : el.value.trim(); calcMet(); };
+    });
+    calcMet();
+  }
+  function calcMet() {
+    const m = draft.metrics, ex = pct(+m.executed, +m.designed), pa = pct(+m.passed, +m.executed), au = pct(+m.automated, +m.designed);
+    $("#metCalc").textContent = [ex !== null ? `Ejecución: ${ex}%` : "", pa !== null ? `Aprobación: ${pa}%` : "", au !== null ? `Automatizado: ${au}%` : "", openDef(draft) ? `Defectos abiertos: ${openDef(draft)}` : ""].filter(Boolean).join(" · ");
   }
   function renderThread() {
     $("#thread").innerHTML = draft.comments.length ? draft.comments.map(c => `<div class="cm"><small>${new Date(c.at).toLocaleString("es")} · <b>${esc(c.by)}</b></small><p>${esc(c.text)}</p></div>`).join("")
@@ -410,17 +572,26 @@
   function addComment() {
     const text = $("#newComment").value.trim(); if (!text) return;
     let by = lsGet("qa-author", ""); if (!by) { by = prompt("¿Con qué nombre quieres firmar tus comentarios?", "") || "Anónimo"; lsSet("qa-author", by); }
-    draft.comments.push({ id: uid(), at: new Date().toISOString(), by, text });
-    if (!isNew) { store.reqs.find(r => r.id === draft.id).comments = JSON.parse(JSON.stringify(draft.comments)); save(); render(); }
+    const cm = { id: uid(), at: new Date().toISOString(), by, text }; draft.comments.push(cm);
+    if (!isNew) { const id = draft.id; commit(s => { const r = s.reqs.find(x => x.id === id); if (r && !r.comments.some(k => k.id === cm.id)) { r.comments.push(cm); r.lastUpdate = cm.at; } }); render(); }
     $("#newComment").value = ""; renderThread();
   }
-  function submitReq(e) {
+  async function submitReq(e) {
     e.preventDefault(); if (readOnly) return;
     readForm();
     if (!draft.acts.length) return say("Agrega al menos una actividad.", 1);
     if (draft.acts.some(x => x.end < x.start)) return say("Hay una actividad con fecha de fin anterior al inicio.", 1);
     [draft.start, draft.end] = span(draft);
     { const p = progress(draft); draft.percent = p; if (p >= 100) draft.status = "Completado"; else if (p > 0 && draft.status === "Pendiente") draft.status = "En curso"; }
+    if (draft.status === "Completado" && !draft.completedAt) draft.completedAt = today;
+    if (draft.status !== "Completado") draft.completedAt = "";
+    const old = store.reqs.find(r => r.id === draft.id);
+    draft.dateLog ||= []; draft.lastUpdate = new Date().toISOString();
+    if (!old || !draft.committedEnd) draft.committedEnd = draft.end;
+    if (old && old.end !== draft.end) {
+      const why = await askReason(`${draft.code}: el plazo cambia de ${old.end} a ${draft.end}.`); if (why === null) return;
+      draft.dateLog = [...draft.dateLog, { at: draft.lastUpdate, by: authorName(), from: old.end, to: draft.end, reason: why }];
+    }
     const i = store.reqs.findIndex(r => r.id === draft.id);
     i < 0 ? store.reqs.push(draft) : (store.reqs[i] = draft);
     save(); $("#dlg").close(); say("Guardado ✓"); render();
@@ -445,6 +616,8 @@
   }
   function render() {
     if (!$("#v-dash").hidden) renderDash();
+    if (!$("#v-hoy").hidden) renderHoy();
+    if (!$("#v-resumen").hidden) renderResumen();
     if (!$("#v-gantt").hidden) renderGantt();
     if (!$("#v-team").hidden) renderTeam();
     renderClientSel();
@@ -453,6 +626,93 @@
     if (!$("#v-clients").hidden) renderClients();
     if (!$("#v-tpl").hidden) renderTpl();
   }
+  // ---------- Importar Excel / CSV ----------
+  const norm = s => String(s ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+  const HEAD = { code: ["codigo", "cod", "id", "nro", "numero", "n", "ticket", "codigo requerimiento"], title: ["titulo", "nombre", "descripcion", "detalle", "requerimiento", "proyecto"], client: ["cliente", "empresa"],
+    type: ["tipo", "tipo qa", "modalidad"], assignee: ["responsable", "analista", "asignado", "qa", "encargado"], start: ["inicio", "fecha inicio", "desde", "f inicio", "fecha de inicio"],
+    end: ["fin", "termino", "fecha fin", "fecha termino", "fecha compromiso", "compromiso", "plazo", "vencimiento", "fecha de termino", "fecha de fin"], status: ["estado"], percent: ["avance", "% avance", "progreso"] };
+  function toIsoDate(v) {
+    if (v == null || v === "") return "";
+    if (v instanceof Date && !isNaN(v)) { const d = new Date(v.getTime() + 60000); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }   // SheetJS: los componentes locales son los de la celda
+    if (typeof v === "number") return iso(new Date(Math.round((v - 25569) * 86400000)));            // serial de Excel
+    const s = String(v).trim(); let m;
+    if ((m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/))) return `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
+    if ((m = s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})/))) return `${m[3].length === 2 ? "20" + m[3] : m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+    return "";
+  }
+  const loadScript = src => new Promise((ok, no) => { if (window.XLSX) return ok(); const s = document.createElement("script"); s.src = src; s.onload = ok; s.onerror = () => no(new Error("No se pudo cargar el lector de Excel (¿sin internet?)")); document.head.append(s); });
+  let imRows = [];
+  function scaleActs(days, T) {
+    const tot = days.reduce((x, y) => x + y, 0); let ds = days.map(d => Math.max(1, Math.round(d * T / tot)));
+    const diff = T - ds.reduce((x, y) => x + y, 0); ds[ds.length - 1] = Math.max(1, ds[ds.length - 1] + diff); return ds;
+  }
+  function parseSheet(rows) {
+    const keys = Object.keys(rows[0] || {}), map = {};
+    for (const [f, syn] of Object.entries(HEAD)) { const k = keys.find(k => syn.includes(norm(k)) && !Object.values(map).includes(k)); if (k) map[f] = k; }
+    if (!map.code && !map.title) throw new Error("No encontré columnas «Código» ni «Título» en la primera hoja.");
+    const seen = new Set(store.reqs.map(r => (r.clientId + "|" + r.code).toLowerCase())), out = [];
+    rows.forEach((row, i) => {
+      const g = f => (map[f] ? row[map[f]] : ""), code = String(g("code") || "").trim(), title = String(g("title") || "").trim();
+      if (!code && !title) return;
+      const it = { line: i + 2, code: code || title.slice(0, 12), title: title || code, notes: [], err: "" };
+      const cn = String(g("client") || "").trim();
+      const cli = cn ? store.clients.find(c => norm(c.name) === norm(cn)) : (clientId !== "all" ? store.clients.find(c => c.id === clientId) : store.clients[0]);
+      it.clientId = cli?.id || ""; it.clientNew = cli ? "" : (cn || "General"); it.clientName = cli?.name || it.clientNew;
+      it.type = /expr/i.test(String(g("type"))) ? "express" : "trad";
+      const an = String(g("assignee") || "").trim(), mem = an ? store.members.find(m => norm(m.name) === norm(an) || norm(m.name).includes(norm(an)) || norm(an).includes(norm(m.name))) : null;
+      it.assigneeId = mem?.id || ""; it.assigneeName = mem?.name || an; if (an && !mem) it.notes.push("responsable no encontrado");
+      it.start = toIsoDate(g("start")) || today; it.end = toIsoDate(g("end"));
+      if (it.end && it.end < it.start) it.err = "Fin anterior al inicio";
+      const st = norm(g("status")); it.status = /complet|termin|cerrad/.test(st) ? "Completado" : /bloq/.test(st) ? "Bloqueado" : /curso|proceso|ejecu/.test(st) ? "En curso" : "";
+      const pc = parseFloat(String(g("percent")).replace(",", ".").replace("%", "")); it.percent = isNaN(pc) ? null : Math.max(0, Math.min(100, pc <= 1 && String(g("percent")).indexOf("%") < 0 && pc > 0 && pc < 1 ? pc * 100 : pc));
+      const key = ((it.clientId || it.clientNew) + "|" + it.code).toLowerCase();
+      if (!it.err && seen.has(key)) it.err = "Duplicado (ya existe)"; else seen.add(key);
+      it.ok = !it.err; out.push(it);
+    });
+    if (!out.length) throw new Error("La planilla no tiene filas con datos.");
+    return out;
+  }
+  function renderImport() {
+    $("#imWrap").hidden = !imRows.length;
+    $("#imTbl").innerHTML = "<thead><tr><th></th><th>Estado</th><th>Código</th><th>Título</th><th>Cliente</th><th>Tipo</th><th>Responsable</th><th>Inicio</th><th>Fin</th></tr></thead><tbody>" +
+      imRows.map((r, i) => `<tr><td><input type="checkbox" data-ii="${i}"${r.ok ? " checked" : ""}${r.err ? " disabled" : ""}></td><td>${r.err ? `<span class="st al3">${esc(r.err)}</span>` : `<span class="st st-Completado">OK</span>${r.notes.length ? ` <small class="muted">${esc(r.notes.join(", "))}</small>` : ""}`}</td>
+        <td><b>${esc(r.code)}</b></td><td>${esc(r.title)}</td><td>${esc(r.clientName)}${r.clientNew ? ' <span class="badge">nuevo</span>' : ""}</td><td>${r.type === "express" ? "Express" : "Tradicional"}</td><td>${esc(r.assigneeName || "—")}</td><td>${r.start}</td><td>${r.end || '<span class="muted">según plantilla</span>'}</td></tr>`).join("") + "</tbody>";
+    $("#imTbl").querySelectorAll("[data-ii]").forEach(c => (c.onchange = () => { imRows[+c.dataset.ii].ok = c.checked; sumImport(); }));
+    sumImport();
+  }
+  function sumImport() { const n = imRows.filter(r => r.ok).length; $("#imSum").textContent = imRows.length ? `${n} de ${imRows.length} filas se importarán` : ""; $("#imOk").disabled = !n; $("#imOk").textContent = n ? `Importar ${n}` : "Importar"; }
+  function buildImported() {
+    const newClients = {}, by = authorName(), at = new Date().toISOString(), reqs = [];
+    for (const r of imRows.filter(x => x.ok)) {
+      let cid = r.clientId; if (!cid) { newClients[r.clientNew] ||= { id: uid(), name: r.clientNew }; cid = newClients[r.clientNew].id; }
+      const tpl = store.templates[r.type === "express" ? "express" : "trad"], base = tpl.map(t => t.days), tot = base.reduce((x, y) => x + y, 0);
+      const T = r.end ? Math.max(1, d2n(r.end) - d2n(r.start) + 1) : tot, ds = scaleActs(base, T);
+      let s = r.start; const acts = tpl.map((t, i) => { const e = addDays(s, ds[i] - 1), x = { id: uid(), name: t.name, start: s, end: e, percent: 0, assigneeId: r.assigneeId, blocked: false, blockReason: "", blockedSince: "" }; s = addDays(e, 1); return x; });
+      const p = r.status === "Completado" ? 100 : (r.percent ?? 0), done = Math.round(p / 100 * acts.length); acts.forEach((x, i) => (x.percent = i < done ? 100 : 0));
+      const end = acts[acts.length - 1].end;
+      const req = { id: uid(), clientId: cid, code: r.code, title: r.title, type: r.type, assigneeId: r.assigneeId, status: r.status || (done ? "En curso" : "Pendiente"), percent: 0, start: r.start, end, acts,
+        committedEnd: r.end || end, dateLog: [], lastUpdate: at, deliverables: (r.type === "express" ? ["Informe final"] : ["Plan de pruebas", "Evidencias (EVP)", "Informe final"]).map(n => ({ id: uid(), name: n, due: end, state: "pendiente", url: "" })), metrics: {},
+        comments: [{ id: uid(), at, by, text: "Requerimiento importado desde planilla." }] };
+      req.percent = progress(req); if (req.percent >= 100) { req.status = "Completado"; req.completedAt = today; } reqs.push(req);
+    }
+    return { reqs, clients: Object.values(newClients) };
+  }
+  function openImport() { imRows = []; $("#imFile").value = ""; $("#imMsg").hidden = true; renderImport(); $("#imdlg").showModal(); }
+  async function onImportFile(e) {
+    const f = e.target.files[0]; if (!f) return; const m = $("#imMsg"); m.hidden = true; imRows = []; renderImport();
+    try {
+      await loadScript("https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js");
+      let wb;
+      if (/\.csv$/i.test(f.name)) {                       // CSV: UTF-8 o Windows-1252, separado por coma o punto y coma
+        const buf = await f.arrayBuffer(); let txt = new TextDecoder("utf-8").decode(buf); if (txt.includes("\uFFFD")) txt = new TextDecoder("windows-1252").decode(buf);
+        txt = txt.replace(/^\uFEFF/, ""); const l1 = txt.split(/\r?\n/)[0] || "";
+        wb = XLSX.read(txt, { type: "string", raw: true, FS: (l1.match(/;/g) || []).length > (l1.match(/,/g) || []).length ? ";" : "," });
+      } else wb = XLSX.read(await f.arrayBuffer(), { type: "array", cellDates: true });
+      const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "", raw: true });
+      imRows = parseSheet(rows); renderImport();
+    } catch (er) { m.textContent = er.message || "No se pudo leer el archivo."; m.hidden = false; }
+  }
+
   // ---------- Exportar carta Gantt ----------
   function ganttHtml(forPrint) {
     const list = visible().sort((x, y) => clientName(x.clientId).localeCompare(clientName(y.clientId)) || x.code.localeCompare(y.code));
@@ -519,6 +779,16 @@
   $("#btnNew").onclick = () => openReq(null);
   $("#btnExport").onclick = () => D.exportJson(store);
   $("#btnCsv").onclick = csv;
+  $("#btnImportXls").onclick = openImport; $("#imFile").onchange = onImportFile;
+  $("#imClose").onclick = $("#imCancel").onclick = () => $("#imdlg").close();
+  $("#imOk").onclick = () => {
+    const { reqs, clients } = buildImported(); if (!reqs.length) return;
+    commit(s => { clients.forEach(c => { if (!s.clients.some(x => x.id === c.id)) s.clients.push(c); }); reqs.forEach(r => { if (!s.reqs.some(x => x.id === r.id)) s.reqs.push(r); }); });
+    $("#imdlg").close(); say(`${reqs.length} requerimiento(s) importado(s) ✓`); render();
+  };
+  $("#imTpl").onclick = e => { e.preventDefault(); const c = "Código,Título,Cliente,Tipo,Responsable,Inicio,Fin,Estado,Avance\r\nR1903,Aranda - SOLFON,IPS,Tradicional,Ana Torres,2026-10-14,2026-11-03,En curso,40\r\nR2044,Ajuste reporte de saldos,Hites,Express,Luis Rojas,2026-10-21,2026-10-24,Pendiente,0\r\n";
+    const l = document.createElement("a"); l.href = URL.createObjectURL(new Blob(["\ufeff" + c], { type: "text/csv" })); l.download = "plantilla-importacion-requerimientos.csv"; l.click(); };
+  $("#hoyMine").onchange = renderHoy;
   $("#btnGanttXls").onclick = exportGanttXls;
   $("#btnGanttPdf").onclick = exportGanttPdf;
   $("#btnImport").onclick = () => $("#fileImport").click();
@@ -545,6 +815,7 @@
   };
   $("#rform").assigneeId.onchange = () => { draft.assigneeId = $("#rform").assigneeId.value; };
   $("#btnActAdd").onclick = () => { const last = draft.acts[draft.acts.length - 1]; const s = last ? addDays(last.end, 1) : today; draft.acts.push({ id: uid(), name: "Nueva actividad", start: s, end: s, percent: 0, assigneeId: draft.assigneeId, blocked: false }); renderActs(); };
+  $("#btnDelAdd").onclick = () => { draft.deliverables.push({ id: uid(), name: "Nuevo entregable", due: span(draft)[1] || today, state: "pendiente", url: "" }); renderDel(); };
   $("#btnActTpl").onclick = () => { if (!draft.acts.length || confirm("Esto reemplaza las actividades actuales por la plantilla. ¿Continuar?")) { readForm(); draft.acts = fromTemplate(draft.acts[0]?.start || today); renderActs(); } };
   $("#btnComment").onclick = addComment;
   $("#rform").onsubmit = submitReq;

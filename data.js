@@ -26,10 +26,10 @@
   });
   const defaultRoles = () => ["QA Funcional", "QA Automatizador"];
   const emptyStore = () => ({ clients: [], members: [], roles: defaultRoles(), templates: defaultTemplates(), reqs: [] });
-  const normalize = o => { o.roles ||= defaultRoles(); o.templates ||= defaultTemplates(); o.templates.express ||= defaultTemplates().express; o.members ||= []; o.reqs ||= []; o.clients ||= []; if (!o.clients.length) o.clients.push({ id: uid(), name: "General" }); o.reqs.forEach(r => { if (!o.clients.some(c => c.id === r.clientId)) r.clientId = o.clients[0].id; }); o.members.forEach(m => { m.roles ||= m.role ? [m.role] : []; delete m.role; }); return o; };
+  const normalize = o => { o.roles ||= defaultRoles(); o.templates ||= defaultTemplates(); o.templates.express ||= defaultTemplates().express; o.members ||= []; o.reqs ||= []; o.clients ||= []; if (!o.clients.length) o.clients.push({ id: uid(), name: "General" }); o.reqs.forEach(r => { if (!o.clients.some(c => c.id === r.clientId)) r.clientId = o.clients[0].id; r.comments ||= []; r.acts ||= []; r.deliverables ||= []; r.metrics ||= {}; r.dateLog ||= []; r.committedEnd ||= r.end; r.lastUpdate ||= (r.comments.length ? r.comments[r.comments.length - 1].at : new Date().toISOString()); r.acts.forEach(a => { a.blockReason ||= ""; a.blockedSince ||= ""; }); }); o.members.forEach(m => { m.roles ||= m.role ? [m.role] : []; delete m.role; }); return o; };
 
   function seed() {
-    const t = iso(new Date());
+    const t = iso(new Date(Date.now() - new Date().getTimezoneOffset() * 60000));
     const m = [
       { id: uid(), name: "Ana Torres", email: "ana@empresa.com", roles: ["QA Funcional"] },
       { id: uid(), name: "Luis Rojas", email: "luis@empresa.com", roles: ["QA Automatizador", "QA Funcional"] },
@@ -61,7 +61,7 @@
   // ---------- local ----------
   function localLoad() {
     try { const r = localStorage.getItem(KEY); if (r) return normalize(JSON.parse(r)); } catch {}
-    const s = seed(); localSave(s); return s;
+    const s = normalize(seed()); localSave(s); return s;
   }
   function localSave(s) { try { localStorage.setItem(KEY, JSON.stringify(s)); } catch {} }
 
@@ -75,13 +75,21 @@
     version = data.version;
     return data.data && data.data.reqs ? normalize(data.data) : null;
   }
-  async function pushNow() {
+  let ops = [];                                  // cambios pequeños (check-ins, comentarios) que se pueden re-aplicar sobre la última versión
+  D.queueOp = op => { if (remote && canEdit) ops.push(op); };
+  async function pushNow(retry = 0) {
     const s = pending; pending = null; if (!s) return;
+    const mine = ops; ops = [];
     const { data, error } = await sb.from("app_state").update({ data: s, version: version + 1 }).eq("id", 1).eq("version", version).select("version");
-    if (error) return D.onError("No se pudo guardar: " + error.message);
+    if (error) { ops = mine.concat(ops); return D.onError("No se pudo guardar: " + error.message); }
     if (!data.length) {
+      const fresh = await fetchState();
+      if (fresh && mine.length && retry < 3) {      // re-aplica mis cambios sobre la versión más nueva y reintenta
+        mine.forEach(op => op(fresh)); ops = mine.concat(ops); pending = fresh; D.onRemoteChange(fresh);
+        return pushNow(retry + 1);
+      }
       D.onError("Otra persona guardó cambios antes que tú. Se cargó la versión más reciente; repite tu cambio.");
-      const fresh = await fetchState(); if (fresh) D.onRemoteChange(fresh);
+      if (fresh) D.onRemoteChange(fresh);
       return;
     }
     version = data[0].version;
