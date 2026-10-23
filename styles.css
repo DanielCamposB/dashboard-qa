@@ -395,3 +395,15 @@ dialog{width:min(1240px,97vw)}
 #tplCustom h2{margin:0 0 6px}
 .tplName{font:inherit;font-weight:700;font-size:inherit;width:min(520px,100%);color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:6px 10px}
 #tplPick{margin-left:6px;padding:6px 8px;font-size:12px}
+
+/* Desplegables de Roles / Responsables: más grandes y con flecha en botón */
+.rolepick{min-width:210px}
+.rolepick summary{min-height:42px;display:flex;align-items:center;padding:8px 52px 8px 14px;font-size:14px;font-weight:600;border-radius:10px;border:1px solid color-mix(in srgb,var(--acc) 35%,var(--line));background:linear-gradient(180deg,color-mix(in srgb,var(--card) 92%,#fff),var(--card));box-shadow:0 1px 4px rgba(0,0,0,.25);transition:border-color .15s,box-shadow .15s}
+.rolepick summary:hover{border-color:var(--acc);box-shadow:0 0 0 3px color-mix(in srgb,var(--acc) 18%,transparent)}
+.rolepick summary::after{content:"";position:absolute;right:6px;top:50%;transform:translateY(-50%);width:32px;height:30px;border-radius:8px;background:color-mix(in srgb,var(--acc) 16%,transparent) no-repeat center/14px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 14'%3E%3Cpath d='M2 5l5 5 5-5' fill='none' stroke='%2300e5ff' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");transition:transform .15s,background-color .15s}
+.rolepick[open] summary::after{transform:translateY(-50%) rotate(180deg);background-color:color-mix(in srgb,var(--acc) 30%,transparent)}
+.rpmenu{border-radius:12px;padding:8px}
+.rpmenu label{padding:9px 12px;font-size:14px}
+#actTbl .rolepick{min-width:0}
+#actTbl .rolepick summary{min-height:36px;font-size:13px;padding:6px 44px 6px 10px}
+#actTbl .rolepick summary::after{width:28px;height:26px}
