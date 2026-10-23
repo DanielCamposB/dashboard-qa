@@ -369,3 +369,13 @@ dialog{width:min(1240px,97vw)}
   #tbl td[data-l="Inicio"],#tbl td[data-l="Fin"]{min-width:120px;white-space:nowrap}
   #tbl td[data-l="Último seguimiento"]{min-width:300px}
 }
+
+/* Tabla principal: valores centrados, avance y estados bien visibles (escritorio) */
+@media(min-width:801px){
+  #tbl th,#tbl td{text-align:center;vertical-align:middle}
+  #tbl td[data-l="Estado"] .st,#tbl td[data-l="Tipo"] .pill{display:inline-block;margin:2px 3px;padding:4px 12px;font-size:13px;font-weight:600}
+  #tbl td[data-l="Fin"] .st{display:inline-block;margin-left:6px;padding:3px 9px;font-size:12px;font-weight:600}
+  #tbl td[data-l="Avance"] .pbar{width:130px;height:24px;border-radius:12px;margin:0 auto}
+  #tbl td[data-l="Avance"] .pbar span{position:absolute;inset:0;padding:0;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;line-height:1;text-shadow:0 1px 2px rgba(0,0,0,.75)}
+  #tbl .lc{max-width:none}
+}
