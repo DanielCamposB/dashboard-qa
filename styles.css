@@ -37,6 +37,11 @@ button.danger{color:var(--s-atr)}
 .read .bar{cursor:default}.read .bar .h{display:none}
 .st-Pendiente{background:var(--s-pend)}.st-Encurso{background:var(--s-curso)}.st-Bloqueado{background:var(--s-bloq)}.st-Atrasado{background:var(--s-atr)}.st-Completado{background:var(--s-ok)}
 .msg{padding:0 20px 14px;color:var(--mut)}.msg.err{color:var(--s-atr)}
+.star{color:#ff4d5a;font-weight:800}
+.rform .hint{display:block;font-size:11px;font-weight:400;color:var(--mut);margin-top:3px;line-height:1.35}
+.reqnote{margin:0 0 4px}.opt{font-weight:400;color:var(--mut)}
+.rform input.bad,.rform select.bad,.rform textarea.bad,.rform button.bad,.rform table.bad{border-color:#ff4d5a !important;background:rgba(255,77,90,.12) !important;box-shadow:0 0 0 2px rgba(255,77,90,.35)}
+.rform input:user-invalid,.rform select:user-invalid,.rform textarea:user-invalid{border-color:#ff4d5a;box-shadow:0 0 0 2px rgba(255,77,90,.35)}
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:9999;max-width:min(560px,90vw);padding:12px 18px;border-radius:10px;background:#0f1a2b;color:#e8eefc;border:1px solid #2a3a55;box-shadow:0 8px 30px #000a;cursor:pointer}
 .toast.err{border-color:#e5484d;background:#2a1216;color:#ffb4b8}
 .panel{position:fixed;right:0;top:0;bottom:0;width:380px;max-width:100%;background:var(--card);border-left:1px solid var(--line);padding:18px;overflow:auto;z-index:20;box-shadow:-8px 0 24px rgba(0,0,0,.15)}

@@ -99,7 +99,8 @@
   const ids = x => (x?.assigneeIds?.length ? x.assigneeIds : x?.assigneeId ? [x.assigneeId] : []).filter(i => store.members.some(m => m.id === i));
   const effIds = (a, r) => (ids(a).length ? ids(a) : ids(r));
   const mnames = (x, fb) => { const l = effIds(x, fb); return l.length ? l.map(mname).join(", ") : "—"; };
-  const setIds = (x, l) => { x.assigneeIds = l; x.assigneeId = l[0] || ""; };
+  const pctOpts = cur => { const l = Array.from({ length: 21 }, (_, i) => i * 5); if (!l.includes(cur) && cur >= 0) l.push(cur), l.sort((x, y) => x - y); return l.map(p => `<option${p === cur ? " selected" : ""}>${p}</option>`).join(""); };
+  const setIds =(x, l) => { x.assigneeIds = l; x.assigneeId = l[0] || ""; };
   const rolesOf = x => [...new Set(ids(x).flatMap(memberRoles))];
   const memberPick = (attr, sel, off) => `<details class="rolepick"><summary>${sel.length ? esc(sel.map(mname).join(", ")) : "Sin asignar"}</summary><div class="rpmenu">${store.members.length ? store.members.map(m => `<label><input type="checkbox" ${attr} value="${m.id}"${sel.includes(m.id) ? " checked" : ""}${off ? " disabled" : ""}> ${esc(m.name)}${m.roles.length ? " · " + esc(m.roles.join(", ")) : ""}</label>`).join("") : '<small class="muted">Agrega miembros en Equipo</small>'}</div></details>`;
 
@@ -361,7 +362,7 @@
         <div class="hinfo"><b>${esc(r.code)}</b> · ${esc(r.title)} <small class="muted">${esc(clientName(r.clientId))}</small>
           <div class="hact">${esc(a.name)} · ${esc(mnames(a, r))} · vence ${a.end}${late}${blk}</div></div>
         ${readOnly ? `<div class="hctl"><span class="pbar"><i style="width:${a.percent}%"></i><span>${a.percent}%</span></span></div>` : `<div class="hctl">
-          <select class="hp" aria-label="Avance">${[0, 25, 50, 75, 100].map(p => `<option${p === a.percent ? " selected" : ""}>${p}</option>`).join("")}</select>
+          <select class="hp" aria-label="Avance">${pctOpts(a.percent)}</select>
           <input class="hc" placeholder="Comentario (obligatorio si bloqueas)" aria-label="Comentario">
           <label class="hb"><input type="checkbox" class="hbk"${a.blocked ? " checked" : ""}> Bloqueada</label>
           <button class="primary hs">Registrar</button></div>`}
@@ -555,10 +556,10 @@
     draft.percent = Math.min(100, Math.max(0, +f.percent.value || 0));
   }
   function renderActs() {
-    $("#actTbl").innerHTML = `<thead><tr><th>Actividad</th><th>Resp.</th><th>Inicio</th><th>Fin</th><th>%</th><th>Bloq.</th><th></th></tr></thead><tbody>` +
-      draft.acts.map((a, i) => `<tr><td><textarea class="grow" rows="1" data-i="${i}" data-f="name">${esc(a.name)}</textarea></td><td>${memberPick(`data-ai="${i}"`, ids(a), readOnly)}</td>
+    $("#actTbl").innerHTML = `<thead><tr><th>Actividad <span class="star">*</span></th><th>Resp.</th><th>Inicio <small class="opt">(opcional)</small></th><th>Fin <small class="opt">(opcional)</small></th><th>% Avance</th><th>Bloq.</th><th></th></tr></thead><tbody>` +
+      draft.acts.map((a, i) => `<tr><td><textarea class="grow" rows="1" required data-i="${i}" data-f="name">${esc(a.name)}</textarea></td><td>${memberPick(`data-ai="${i}"`, ids(a), readOnly)}</td>
         <td><input type="date" data-i="${i}" data-f="start" value="${a.start}"></td><td><input type="date" data-i="${i}" data-f="end" value="${a.end}"></td>
-        <td><select data-i="${i}" data-f="percent">${[0, 25, 50, 75, 100].map(p => `<option${p === a.percent ? " selected" : ""}>${p}</option>`).join("")}</select></td>
+        <td><select data-i="${i}" data-f="percent" title="% de avance de la actividad">${pctOpts(a.percent)}</select></td>
         <td><input type="checkbox" data-i="${i}" data-f="blocked"${a.blocked ? " checked" : ""}></td><td>${readOnly ? "" : `<button type="button" data-rm="${i}" class="danger">✕</button>`}</td></tr>`).join("") + `</tbody>`;
     autosize($("#actTbl"));
     $("#actTbl").querySelectorAll("[data-f]").forEach(el => {
@@ -614,8 +615,21 @@
   }
   async function submitReqInner() {
     readForm();
-    if (!draft.acts.length) return say("Agrega al menos una actividad.", 1);
-    if (draft.acts.some(x => x.end < x.start)) return say("Hay una actividad con fecha de fin anterior al inicio.", 1);
+    const form = $("#rform"), bad = [];
+    form.querySelectorAll(".bad").forEach(el => el.classList.remove("bad"));
+    const mark = (el, why) => { if (el) { el.classList.add("bad"); bad.push(why); } };
+    for (const [k, n] of [["clientId", "Cliente"], ["code", "Código"], ["title", "Título"]]) if (!String(draft[k] || "").trim()) mark(form[k], `${n} es obligatorio`);
+    const wiUrl = form.querySelector('[data-m="wiUrl"]'); if (wiUrl && !wiUrl.checkValidity()) mark(wiUrl, "El enlace al work item debe comenzar con https://");
+    if (!draft.acts.length) { mark($("#btnActAdd"), "Agrega al menos una actividad"); mark($("#actTbl"), ""); }
+    // fechas opcionales: si se dejan vacías se completan con la actividad anterior (inicio) o con el inicio (fin)
+    draft.acts.forEach((a, i) => {
+      if (!a.start) a.start = i ? addDays(draft.acts[i - 1].end || draft.acts[i - 1].start, 1) : (draft.start || today);
+      if (!a.end) a.end = a.start;
+      const row = $("#actTbl").querySelector(`tbody tr:nth-child(${i + 1})`);
+      if (!String(a.name || "").trim()) mark(row?.querySelector('[data-f="name"]'), `Actividad ${i + 1}: el nombre es obligatorio`);
+      if (a.end < a.start) { mark(row?.querySelector('[data-f="end"]'), `Actividad ${i + 1}: la fecha de fin es anterior al inicio`); mark(row?.querySelector('[data-f="start"]'), ""); }
+    });
+    if (bad.length) { form.querySelector(".bad")?.scrollIntoView({ block: "center" }); return say("Revisa los campos marcados en rojo: " + [...new Set(bad.filter(Boolean))].join("; ") + ".", 1); }
     [draft.start, draft.end] = span(draft);
     { const p = progress(draft); draft.percent = p; if (p >= 100) draft.status = "Completado"; else if (p > 0 && draft.status === "Pendiente") draft.status = "En curso"; }
     if (draft.status === "Completado" && !draft.completedAt) draft.completedAt = today;
@@ -854,7 +868,8 @@
   $("#btnComment").onclick = addComment;
   $("#rform").onsubmit = submitReq;
   // campos inválidos (p. ej. Código/Título vacío, enlace mal escrito) bloquean el envío sin avisar si quedan fuera de vista
-  $("#rform").addEventListener("invalid", ev => { const l = ev.target.closest("label"); say(`Campo inválido: ${(l ? l.childNodes[0].textContent : ev.target.name || "").trim()} — ${ev.target.validationMessage}`, 1); }, true);
+  ["input", "change"].forEach(t => $("#rform").addEventListener(t, ev => ev.target.classList?.remove("bad")));
+  $("#rform").addEventListener("invalid", ev => { ev.target.classList.add("bad"); const l =ev.target.closest("label"); say(`Campo inválido: ${(l ? l.childNodes[0].textContent : ev.target.name || "").trim().replace(/\s*\*$/, "")} — ${ev.target.validationMessage}`, 1); }, true);
   $("#rCancel").onclick = $("#rClose").onclick = () => $("#dlg").close();
   $("#rDelete").onclick = () => { if (confirm("¿Eliminar este requerimiento y su seguimiento?")) { store.reqs = store.reqs.filter(r => r.id !== draft.id); save(); $("#dlg").close(); render(); } };
 

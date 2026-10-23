@@ -246,17 +246,18 @@
     <header><h2 id="rTitle">Requerimiento</h2><button type="button" id="rClose">✕</button></header>
     <div class="rgrid">
       <div class="col">
-        <label>Cliente <select name="clientId"></select></label>
-        <div class="row2"><label>Código <input name="code" required placeholder="R1903"></label>
+        <p class="hint reqnote"><span class="star">*</span> Campo obligatorio. Los campos con error se marcan en rojo.</p>
+        <label>Cliente <span class="star">*</span><select name="clientId" required></select></label>
+        <div class="row2"><label>Código <span class="star">*</span><input name="code" required placeholder="R1903"></label>
           <label>Tipo <select name="type"><option value="trad">QA Tradicional (Gantt)</option><option value="express">QA Express (rápido)</option></select></label></div>
-        <label>Título <input name="title" required></label>
+        <label>Título <span class="star">*</span><input name="title" required></label>
         <div class="row2"><div class="lbl">Responsables<div id="assigneePick"></div></div>
           <label>Estado <select name="status"><option>Pendiente</option><option>En curso</option><option>Bloqueado</option><option>Completado</option></select></label></div>
         <div id="commitBox" class="commitBox" hidden></div>
         <div class="row2" id="datesRow"><label>Inicio <input type="date" name="start"></label><label>Fin <input type="date" name="end"></label></div>
         <label id="pctRow">Avance % (express) <input type="number" name="percent" min="0" max="100" step="5"></label>
         <div id="actsBox">
-          <h3>Actividades <button type="button" id="btnActAdd" data-edit>+</button> <button type="button" id="btnActTpl" data-edit title="Reemplaza por la plantilla">Aplicar plantilla</button></h3>
+          <h3>Actividades <span class="star">*</span> <button type="button" id="btnActAdd" data-edit>+</button> <button type="button" id="btnActTpl" data-edit title="Reemplaza por la plantilla">Aplicar plantilla</button></h3>
           <table id="actTbl"></table>
         </div>
         <div id="delBox">
@@ -266,18 +267,18 @@
         <div id="metBox">
           <h3>Métricas técnicas y trazabilidad</h3>
           <div class="metGrid">
-            <label>Casos diseñados<input type="number" min="0" data-m="designed"></label>
-            <label>Casos ejecutados<input type="number" min="0" data-m="executed"></label>
-            <label>Aprobados<input type="number" min="0" data-m="passed"></label>
-            <label>Fallidos<input type="number" min="0" data-m="failed"></label>
-            <label>Automatizados<input type="number" min="0" data-m="automated"></label>
-            <label>Defectos críticos<input type="number" min="0" data-m="crit"></label>
-            <label>Defectos altos<input type="number" min="0" data-m="high"></label>
-            <label>Defectos medios<input type="number" min="0" data-m="med"></label>
-            <label>Defectos bajos<input type="number" min="0" data-m="low"></label>
+            <label>Casos diseñados<input type="number" min="0" data-m="designed"><small class="hint">Total de casos de prueba escritos para este requerimiento. Es la base de los % de ejecución y automatización.</small></label>
+            <label>Casos ejecutados<input type="number" min="0" data-m="executed"><small class="hint">Cuántos de los casos diseñados ya se corrieron. Con esto se calcula el % de ejecución.</small></label>
+            <label>Aprobados<input type="number" min="0" data-m="passed"><small class="hint">Casos ejecutados cuyo resultado fue el esperado (OK). Se usa para el % de aprobación.</small></label>
+            <label>Fallidos<input type="number" min="0" data-m="failed"><small class="hint">Casos ejecutados cuyo resultado no fue el esperado; normalmente generan un defecto.</small></label>
+            <label>Automatizados<input type="number" min="0" data-m="automated"><small class="hint">Casos que ya tienen script automático (Selenium, etc.). Se usa para el % de automatización.</small></label>
+            <label>Defectos críticos<input type="number" min="0" data-m="crit"><small class="hint">Errores que impiden usar el sistema o el flujo, sin alternativa.</small></label>
+            <label>Defectos altos<input type="number" min="0" data-m="high"><small class="hint">Fallas importantes de una funcionalidad; existe una alternativa pero es difícil.</small></label>
+            <label>Defectos medios<input type="number" min="0" data-m="med"><small class="hint">Fallas parciales que no impiden operar; hay alternativa razonable.</small></label>
+            <label>Defectos bajos<input type="number" min="0" data-m="low"><small class="hint">Detalles menores: textos, formato, estética.</small></label>
           </div>
-          <div class="row2"><label>ID work item (Azure DevOps / Jira)<input data-m="wiId" placeholder="Ej: 168002"></label>
-            <label>Enlace al work item<input data-m="wiUrl" type="url" placeholder="https://..."></label></div>
+          <div class="row2"><label>ID work item (Azure DevOps / Jira)<input data-m="wiId" placeholder="Ej: 168002"><small class="hint">Número del ticket o tarea en Azure DevOps / Jira, para trazabilidad.</small></label>
+            <label>Enlace al work item<input data-m="wiUrl" type="url" placeholder="https://..."><small class="hint">Link directo al ticket (debe comenzar con https://).</small></label></div>
           <p class="muted" id="metCalc"></p>
         </div>
       </div>
