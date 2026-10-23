@@ -379,3 +379,12 @@ dialog{width:min(1240px,97vw)}
   #tbl td[data-l="Avance"] .pbar span{position:absolute;inset:0;padding:0;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;line-height:1;text-shadow:0 1px 2px rgba(0,0,0,.75)}
   #tbl .lc{max-width:none}
 }
+
+/* Seguimiento de hoy: grupos que se expanden / minimizan */
+.hgroup h3.htog{cursor:pointer!important;user-select:none}
+.hgroup h3.htog:hover{color:var(--acc)}
+.hchev{margin-left:auto;color:var(--mut);transition:transform .15s}
+.hgroup.closed .hchev{transform:rotate(-90deg)}
+.hgroup.closed .hbody{display:none}
+.hgroup.closed h3{margin-bottom:0}
+#v-hoy .toolbar .ghost{margin-left:6px}

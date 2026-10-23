@@ -341,6 +341,11 @@
 
   // ---------- Hoy ----------
   const myMemberId = () => { const em = (boot.user || "").toLowerCase(); return em ? (store.members.find(m => m.email && m.email.toLowerCase() === em)?.id || "") : ""; };
+  let hoyClosed = new Set(); try { hoyClosed = new Set(JSON.parse(lsGet("qa-hoy-closed", "[]"))); } catch {}
+  function setHoyAll(close) {
+    const keys = [...$("#hoyBody").querySelectorAll(".hgroup")].map(g => g.dataset.g);
+    hoyClosed = new Set(close ? keys : []); lsSet("qa-hoy-closed", JSON.stringify([...hoyClosed])); renderHoy();
+  }
   function renderHoy() {
     $("#hoyDate").textContent = new Date().toLocaleDateString("es", { weekday: "long", day: "numeric", month: "long" });
     const mineOn = $("#hoyMine").checked, me = myMemberId(), mine = mineOn && me;
@@ -369,9 +374,11 @@
       </div>`;
     };
     const stale = staleList().filter(r => !mine || ids(r).includes(me));
-    let h = groups.map(([t, cls, list]) => `<div class="card hgroup"><h3 class="${cls}"><span class="hcount">${list.length}</span> ${t}</h3>${list.length ? list.sort((x, y) => x.a.end.localeCompare(y.a.end)).map(row).join("") : '<p class="muted">Nada por aquí 👌</p>'}</div>`).join("");
-    h += `<div class="card hgroup"><h3 class="alS"><span class="hcount">${stale.length}</span> Requerimientos sin actualizar (≥ ${STALE} días hábiles)</h3>` + (stale.length ? stale.map(r => `<div class="hrow stale" data-open="${r.id}"><div class="hinfo"><b>${esc(r.code)}</b> · ${esc(r.title)} <small class="muted">${esc(clientName(r.clientId))}</small><div class="hact">${esc(mnames(r))} · último avance ${ldate(r.lastUpdate)} (hace ${staleDays(r)} días hábiles)</div></div><div class="hctl"><button class="ghost">Abrir</button></div></div>`).join("") : '<p class="muted">Todo al día 👌</p>') + "</div>";
+    const grp = (key, cls, n, title, body) => `<div class="card hgroup${hoyClosed.has(key) ? " closed" : ""}" data-g="${esc(key)}"><h3 class="${cls} htog" role="button" tabindex="0" aria-expanded="${!hoyClosed.has(key)}" title="Clic para expandir o minimizar"><span class="hcount">${n}</span> ${title}<span class="hchev">▾</span></h3><div class="hbody">${body}</div></div>`;
+    let h = groups.map(([t, cls, list]) => grp(t, cls, list.length, t, list.length ? list.sort((x, y) => x.a.end.localeCompare(y.a.end)).map(row).join("") : '<p class="muted">Nada por aquí 👌</p>')).join("");
+    h += grp("stale", "alS", stale.length, `Requerimientos sin actualizar (≥ ${STALE} días hábiles)`, stale.length ? stale.map(r => `<div class="hrow stale" data-open="${r.id}"><div class="hinfo"><b>${esc(r.code)}</b> · ${esc(r.title)} <small class="muted">${esc(clientName(r.clientId))}</small><div class="hact">${esc(mnames(r))} · último avance ${ldate(r.lastUpdate)} (hace ${staleDays(r)} días hábiles)</div></div><div class="hctl"><button class="ghost">Abrir</button></div></div>`).join("") : '<p class="muted">Todo al día 👌</p>');
     $("#hoyBody").innerHTML = h;
+    $("#hoyBody").querySelectorAll(".htog").forEach(t => { const toggle = () => { const g = t.closest(".hgroup"), k = g.dataset.g, c = !g.classList.contains("closed"); g.classList.toggle("closed", c); t.setAttribute("aria-expanded", !c); c ? hoyClosed.add(k) : hoyClosed.delete(k); lsSet("qa-hoy-closed", JSON.stringify([...hoyClosed])); }; t.onclick = toggle; t.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } }; });
     $("#hoyBody").querySelectorAll("[data-open]").forEach(x => (x.onclick = () => openReq(x.dataset.open)));
     $("#hoyBody").querySelectorAll(".hrow[data-a] .hs").forEach(btn => (btn.onclick = () => {
       const rowEl = btn.closest(".hrow"), rid = rowEl.dataset.r, aid = rowEl.dataset.a;
@@ -862,6 +869,7 @@
     if (!draft.acts.length || untouched || confirm(`Cambiar a ${label} reemplaza las actividades actuales por las de su plantilla. ¿Continuar?`)) { draft.acts = fromTemplate(draft.acts[0]?.start || today); renderActs(); }
     else { draft.type = prev; $("#rform").type.value = prev; syncType(); }
   };
+  $("#hoyExpand").onclick = () => setHoyAll(false); $("#hoyCollapse").onclick = () => setHoyAll(true);
   $("#btnActAdd").onclick = () => { const last = draft.acts[draft.acts.length - 1]; const s = last ? addDays(last.end, 1) : today; draft.acts.push({ id: uid(), name: "Nueva actividad", start: s, end: s, percent: 0, assigneeId: draft.assigneeId, assigneeIds: [...ids(draft)], blocked: false }); renderActs(); };
   $("#btnDelAdd").onclick = () => { draft.deliverables.push({ id: uid(), name: "Nuevo entregable", due: span(draft)[1] || today, state: "pendiente", url: "" }); renderDel(); };
   $("#btnActTpl").onclick = () => { if (!draft.acts.length || confirm("Esto reemplaza las actividades actuales por la plantilla. ¿Continuar?")) { readForm(); draft.acts = fromTemplate(draft.acts[0]?.start || today); renderActs(); } };
