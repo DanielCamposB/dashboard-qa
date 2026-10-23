@@ -407,3 +407,6 @@ dialog{width:min(1240px,97vw)}
 #actTbl .rolepick{min-width:0}
 #actTbl .rolepick summary{min-height:36px;font-size:13px;padding:6px 44px 6px 10px}
 #actTbl .rolepick summary::after{width:28px;height:26px}
+
+.pill.custom{background:#c2549a}
+.rolepick .rpmenu{z-index:10000}

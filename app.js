@@ -100,6 +100,11 @@
   const effIds = (a, r) => (ids(a).length ? ids(a) : ids(r));
   const mnames = (x, fb) => { const l = effIds(x, fb); return l.length ? l.map(mname).join(", ") : "—"; };
   const pctOpts = cur => { const l = Array.from({ length: 21 }, (_, i) => i * 5); if (!l.includes(cur) && cur >= 0) l.push(cur), l.sort((x, y) => x - y); return l.map(p => `<option${p === cur ? " selected" : ""}>${p}</option>`).join(""); };
+  // Tipos de requerimiento = plantillas de actividades: "trad", "express" y las personalizadas (customTpl)
+  const BASE_TYPES = { trad: "Tradicional", express: "Express" };
+  const typeName = t => BASE_TYPES[t] || (store.customTpl || []).find(c => c.id === t)?.name || "Tipo eliminado";
+  const tplFor = t => store.templates[t] || (store.customTpl || []).find(c => c.id === t)?.acts || store.templates.trad;
+  const typeOpts = (first, base) => (first ? `<option value="">${first}</option>` : "") + (base ? `<option value="trad">QA Tradicional (Gantt)</option><option value="express">QA Express (rápido)</option>` : `<option value="express">QA Express</option><option value="trad">QA Tradicional</option>`) + (store.customTpl || []).map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
   const setIds =(x, l) => { x.assigneeIds = l; x.assigneeId = l[0] || ""; };
   const rolesOf = x => [...new Set(ids(x).flatMap(memberRoles))];
   const memberPick = (attr, sel, off) => `<details class="rolepick"><summary>${sel.length ? esc(sel.map(mname).join(", ")) : "Sin asignar"}</summary><div class="rpmenu">${store.members.length ? store.members.map(m => `<label><input type="checkbox" ${attr} value="${m.id}"${sel.includes(m.id) ? " checked" : ""}${off ? " disabled" : ""}> ${esc(m.name)}${m.roles.length ? " · " + esc(m.roles.join(", ")) : ""}</label>`).join("") : '<small class="muted">Agrega miembros en Equipo</small>'}</div></details>`;
@@ -305,7 +310,7 @@
       (rows.map(r => {
         const p = progress(r), [s, e] = span(r), lc = lastComment(r);
         return `<tr data-id="${r.id}">${clientId === "all" ? `<td>${esc(clientName(r.clientId))}</td>` : ""}<td><b>${esc(r.code)}</b></td><td>${esc(r.title)}</td>
-          <td><span class="pill ${r.type}">${r.type === "trad" ? "Tradicional" : "Express"}</span></td><td>${esc(mnames(r))}<br><small class="muted">${esc(rolesOf(r).join(", "))}</small></td>
+          <td><span class="pill ${BASE_TYPES[r.type] ? r.type : "custom"}">${esc(typeName(r.type))}</span></td><td>${esc(mnames(r))}<br><small class="muted">${esc(rolesOf(r).join(", "))}</small></td>
           <td><span class="dot ${health(r).lvl}" title="${esc(health(r).why.join(" · ") || "En plazo")}"></span> <span class="st st-${r.status.replace(" ", "")}">${r.status}</span>${late(r) ? ` <span class="st al${lvl(daysLate(span(r)[1]))}">Atrasado ${lvlTxt(daysLate(span(r)[1]))}</span>` : ""}</td>
           <td><div class="pbar"><i style="width:${p}%"></i><span>${p}%</span></div></td><td>${r.deliverables.length ? `${delDone(r)}/${r.deliverables.length}${delOverdue(r).length ? ` <span class="st al3">${delOverdue(r).length} vencido(s)</span>` : ""}` : "—"}</td><td>${s}</td><td>${e}${slip(r) ? ` <span class="st al1" title="Comprometida: ${r.committedEnd}">+${slip(r)} d</span>` : ""}</td>
           <td class="lc">${lc ? `<small>${lc.at.slice(0, 10)} · ${esc(lc.by)}</small><br>${esc(lc.text.slice(0, 90))}` : '<small class="muted">Sin comentarios</small>'} <small class="muted">(${r.comments.length})</small></td></tr>`;
@@ -420,7 +425,7 @@
     for (const r of list) {
       const [s, e] = span(r), p = progress(r), st = "st-" + (late(r) && r.status !== "Bloqueado" ? "Atrasado" : r.status.replace(" ", ""));
       const exp = !r.acts.length;
-      h += `<div class="g-row grp"><div class="g-label" data-open="${r.id}">${esc(r.code)} · ${esc(r.title)}<small>${r.type === "express" ? "Express · " : ""}${esc(mnames(r))} · ${p}%</small></div>
+      h += `<div class="g-row grp"><div class="g-label" data-open="${r.id}">${esc(r.code)} · ${esc(r.title)}<small>${r.type !== "trad" ? esc(typeName(r.type)) + " · " : ""}${esc(mnames(r))} · ${p}%</small></div>
         <div class="g-track" style="width:${W}px">${r.committedEnd && r.committedEnd !== e ? `<i class="cmark" style="left:${x(d2n(r.committedEnd) + 1)}px" title="Fecha comprometida ${r.committedEnd}"></i>` : ""}${exp ? bar("req", r.id, r, st, r.code, p, true) : bar("sum", r.id, { start: s, end: e }, "st-sum", "", p, false)}</div></div>`;
       if (!exp) for (const a of r.acts) {
         const ast = a.blocked ? "st-Bloqueado" : a.percent >= 100 ? "st-Completado" : a.end < today ? "st-Atrasado" : a.percent > 0 ? "st-Encurso" : "st-Pendiente";
@@ -514,28 +519,27 @@
     const box = $("#tplCustom");
     box.innerHTML = (store.customTpl || []).map((c, n) => `<div class="card" data-c="${n}">
       <h2><input class="tplName" data-cn="${n}" value="${esc(c.name)}" aria-label="Nombre de la plantilla"${readOnly ? " disabled" : ""}></h2>
-      <p class="muted">Plantilla personalizada: elígela con "Aplicar plantilla" dentro de un requerimiento.</p>
+      <p class="muted">Tipo personalizado: aparece en el campo "Tipo" de los requerimientos y copia estas actividades.</p>
       <table id="tplTblC-${n}"></table>
       <button class="tplCAdd" data-n="${n}" data-edit>+ Actividad</button>
-      <button class="tplCDel danger" data-n="${n}" data-edit>Eliminar plantilla</button></div>`).join("");
+      <button class="tplCDel danger" data-n="${n}" data-edit>Eliminar tipo</button></div>`).join("");
     (store.customTpl || []).forEach((c, n) => tplTable($("#tplTblC-" + n), c.acts));
-    box.querySelectorAll(".tplName").forEach(i => (i.onchange = () => { const v = i.value.trim(); if (!v) { i.value = store.customTpl[+i.dataset.cn].name; return; } store.customTpl[+i.dataset.cn].name = v; save(); renderTplPick(); }));
+    box.querySelectorAll(".tplName").forEach(i => (i.onchange = () => { const v = i.value.trim(); if (!v) { i.value = store.customTpl[+i.dataset.cn].name; return; } store.customTpl[+i.dataset.cn].name = v; save(); render(); }));
     box.querySelectorAll(".tplCAdd").forEach(b => (b.onclick = () => { store.customTpl[+b.dataset.n].acts.push({ name: "Nueva actividad", days: 1 }); save(); renderTpl(); }));
-    box.querySelectorAll(".tplCDel").forEach(b => (b.onclick = () => { const c = store.customTpl[+b.dataset.n]; if (!confirm(`¿Eliminar la plantilla "${c.name}"? Los requerimientos ya creados no cambian.`)) return; store.customTpl.splice(+b.dataset.n, 1); save(); renderTpl(); }));
+    box.querySelectorAll(".tplCDel").forEach(b => (b.onclick = () => { const c = store.customTpl[+b.dataset.n], n = store.reqs.filter(r => r.type === c.id).length; if (n) return say(`No se puede eliminar "${c.name}": lo usan ${n} requerimiento(s). Cámbiales el tipo primero.`, 1); if (!confirm(`¿Eliminar el tipo "${c.name}"?`)) return; store.customTpl.splice(+b.dataset.n, 1); save(); renderTpl(); }));
     box.querySelectorAll("[data-edit]").forEach(b => (b.hidden = readOnly));
-    renderTplPick();
   }
-  function renderTplPick() {
-    const p = $("#tplPick"), keep = p.value;
-    p.innerHTML = `<option value="">Plantilla del tipo</option>` + (store.customTpl || []).map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
-    p.value = [...p.options].some(o => o.value === keep) ? keep : "";
-    p.hidden = !(store.customTpl || []).length || readOnly;
+  function renderTypeSel() {
+    $("#rform").type.innerHTML = typeOpts("", true);
+  }
+  function renderTypeFilter() {
+    const ft = $("#fType"), keep = ft.value; ft.innerHTML = typeOpts("Todos los tipos", false); ft.value = [...ft.options].some(o => o.value === keep) ? keep : "";
   }
 
   // ---------- Requerimiento (ventana) ----------
-  function fromTemplate(start, custom) {
+  function fromTemplate(start) {
     let s = start || today;
-    return (custom || store.templates[(draft?.type || "trad") === "express" ? "express" : "trad"]).map(a => { const x = { id: uid(), name: a.name, start: s, end: addDays(s, a.days - 1), percent: 0, blocked: false }; setIds(x, ids(draft)); s = addDays(x.end, 1); return x; });
+    return tplFor(draft?.type || "trad").map(a => { const x = { id: uid(), name: a.name, start: s, end: addDays(s, a.days - 1), percent: 0, blocked: false }; setIds(x, ids(draft)); s = addDays(x.end, 1); return x; });
   }
   function renderReqPick() {
     const box = $("#assigneePick"), open = box.querySelector("details")?.open;
@@ -555,7 +559,7 @@
     $("#rTitle").textContent = isNew ? "Nuevo requerimiento" : `${draft.code} · ${draft.title}`;
     f.clientId.innerHTML = store.clients.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
     setIds(draft, ids(draft));
-    renderReqPick();
+    renderTypeSel(); renderReqPick();
     for (const k of ["clientId", "code", "title", "type", "status", "percent", "start", "end"]) f[k].value = draft[k] ?? "";
     draft.deliverables ||= []; draft.metrics ||= {};
     if (isNew && !draft.deliverables.length) draft.deliverables = (draft.type === "express" ? ["Informe final"] : ["Plan de pruebas", "Evidencias (EVP)", "Informe final"]).map(n => ({ id: uid(), name: n, due: span(draft)[1], state: "pendiente", url: "" }));
@@ -564,7 +568,6 @@
     f.querySelectorAll("input,select,textarea").forEach(e => { if (e.id !== "newComment") e.disabled = readOnly; });
     $("#newComment").disabled = readOnly; $("#btnComment").hidden = readOnly; $("#rSave").hidden = readOnly; $("#rDelete").hidden = readOnly || isNew;
     f.querySelectorAll("[data-edit]").forEach(e => { if (e.id !== "rSave" && e.id !== "rDelete") e.hidden = readOnly; });
-    renderTplPick();
     $("#dlg").showModal(); autosize($("#actTbl"));
   }
   function renderCommit() {
@@ -691,6 +694,7 @@
     }));
   }
   function render() {
+    renderTypeFilter();
     if (!$("#v-dash").hidden) renderDash();
     if (!$("#v-hoy").hidden) renderHoy();
     if (!$("#v-resumen").hidden) renderResumen();
@@ -761,7 +765,7 @@
     const newClients = {}, by = authorName(), at = new Date().toISOString(), reqs = [];
     for (const r of imRows.filter(x => x.ok)) {
       let cid = r.clientId; if (!cid) { newClients[r.clientNew] ||= { id: uid(), name: r.clientNew }; cid = newClients[r.clientNew].id; }
-      const tpl = store.templates[r.type === "express" ? "express" : "trad"], base = tpl.map(t => t.days), tot = base.reduce((x, y) => x + y, 0);
+      const tpl = tplFor(r.type), base = tpl.map(t => t.days), tot = base.reduce((x, y) => x + y, 0);
       const T = r.end ? Math.max(1, d2n(r.end) - d2n(r.start) + 1) : tot, ds = scaleActs(base, T);
       let s = r.start; const acts = tpl.map((t, i) => { const e = addDays(s, ds[i] - 1), x = { id: uid(), name: t.name, start: s, end: e, percent: 0, assigneeId: r.assigneeId, blocked: false, blockReason: "", blockedSince: "" }; s = addDays(e, 1); return x; });
       const p = r.status === "Completado" ? 100 : (r.percent ?? 0), done = Math.round(p / 100 * acts.length); acts.forEach((x, i) => (x.percent = i < done ? 100 : 0));
@@ -822,7 +826,7 @@
     const row = (cl, req, act, who, s, e, pct, st, tipo, bold) => `<tr style="${bold ? "font-weight:bold;background:#eef2fb;" : ""}"><td>${esc(cl)}</td><td>${esc(req)}</td><td>${esc(act)}</td><td>${esc(who)}</td><td>${s}</td><td>${e}</td><td style="text-align:center">${pct}%</td><td style="color:${COL[st]};font-weight:bold">${st}</td><td>${tipo}</td>${cols.map(n => cell(n, d2n(s), d2n(e), pct, COL[st])).join("")}</tr>`;
     for (const r of list) {
       const [s, e] = span(r), p = progress(r), rs = reqSt(r), cn = clientName(r.clientId), nm = `${r.code} · ${r.title}`;
-      t += row(cn, nm, r.acts.length ? "(resumen)" : "—", mnames(r), s, e, p, rs, r.type === "trad" ? "Tradicional" : "Express", true);
+      t += row(cn, nm, r.acts.length ? "(resumen)" : "—", mnames(r), s, e, p, rs, typeName(r.type), true);
       r.acts.forEach(a => (t += row("", "", a.name, mnames(a, r), a.start, a.end, a.percent, actSt(a), "", false)));
     }
     return t + "</table>";
@@ -843,7 +847,7 @@
 
   function csv() {
     const rows = [["Cliente", "Código", "Título", "Tipo", "Responsable", "Estado", "Avance %", "Inicio", "Fin", "Comentarios"]].concat(visible().map(r => {
-      const [s, e] = span(r); return [clientName(r.clientId), r.code, r.title, r.type, mnames(r), r.status, progress(r), s, e, r.comments.map(c => `${c.at.slice(0, 10)} ${c.by}: ${c.text}`).join(" | ")];
+      const [s, e] = span(r); return [clientName(r.clientId), r.code, r.title, typeName(r.type), mnames(r), r.status, progress(r), s, e, r.comments.map(c => `${c.at.slice(0, 10)} ${c.by}: ${c.text}`).join(" | ")];
     }));
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob(["﻿" + rows.map(r => r.map(c => `"${String(c ?? "").replace(/"/g, '""')}"`).join(",")).join("\r\n")], { type: "text/csv" }));
@@ -875,6 +879,11 @@
   ["fType", "fRole", "fAssignee", "fStatus"].forEach(i => ($("#" + i).onchange = render)); $("#fText").oninput = render;
   document.querySelectorAll("#zoom button").forEach(b => (b.onclick = () => { pxDay = +b.dataset.z; lsSet("qa-zoom", pxDay); renderGantt(); }));
   $("#memberForm").onsubmit = e => { e.preventDefault(); if (readOnly) return; const f = e.target; store.members.push({ id: uid(), name: f.name.value.trim(), email: f.email.value.trim(), roles: [...document.querySelectorAll("#memberRole input:checked")].map(x => x.value) }); f.reset(); save(); render(); };
+  // el menú se posiciona sobre la ventana (fixed) para que ninguna columna lo recorte ni lo solape
+  const placeMenu = d => { const m = d.querySelector(".rpmenu"), r = d.querySelector("summary").getBoundingClientRect(), h = Math.min(m.scrollHeight, 320), below = innerHeight - r.bottom - 12, up = below < h && r.top > below;
+    Object.assign(m.style, { position: "fixed", left: r.left + "px", minWidth: r.width + "px", maxHeight: Math.max(120, Math.min(320, up ? r.top - 12 : below)) + "px", overflowY: "auto", top: up ? "" : r.bottom + 4 + "px", bottom: up ? innerHeight - r.top + 4 + "px" : "" }); };
+  document.addEventListener("toggle", e => { if (e.target.matches?.(".rolepick[open]")) placeMenu(e.target); }, true);
+  document.addEventListener("scroll", e => { if (!e.target.closest?.(".rpmenu")) document.querySelectorAll(".rolepick[open]").forEach(d => (d.open = false)); }, true);
   document.addEventListener("click", e => document.querySelectorAll(".rolepick[open]").forEach(d => { if (!d.contains(e.target)) d.open = false; }));
   $("#roleForm").onsubmit = e => { e.preventDefault(); if (readOnly) return; const v = e.target.role.value.trim(); if (store.roles.includes(v)) return say("Ese rol ya existe.", 1); store.roles.push(v); e.target.reset(); save(); render(); };
   $("#clientSel").onchange = e => { clientId = e.target.value; lsSet("qa-client", clientId); render(); };
@@ -884,23 +893,19 @@
   $("#rform").type.onchange = () => {
     const prev = draft.type; readForm(); syncType();
     if (draft.type === prev) return;
-    const label = draft.type === "express" ? "QA Express" : "QA Tradicional";
-    const prevNames = JSON.stringify((store.templates[prev === "express" ? "express" : "trad"]).map(t => t.name)), untouched = JSON.stringify(draft.acts.map(t => t.name)) === prevNames;
+    const label = "QA " + typeName(draft.type);
+    const prevNames = JSON.stringify(tplFor(prev).map(t => t.name)), untouched = JSON.stringify(draft.acts.map(t => t.name)) === prevNames;
     if (!draft.acts.length || untouched || confirm(`Cambiar a ${label} reemplaza las actividades actuales por las de su plantilla. ¿Continuar?`)) { draft.acts = fromTemplate(draft.acts[0]?.start || today); renderActs(); }
     else { draft.type = prev; $("#rform").type.value = prev; syncType(); }
   };
   $("#hoyExpand").onclick = () => setHoyAll(false); $("#hoyCollapse").onclick = () => setHoyAll(true);
   $("#btnActAdd").onclick = () => { const last = draft.acts[draft.acts.length - 1]; const s = last ? addDays(last.end, 1) : today; draft.acts.push({ id: uid(), name: "Nueva actividad", start: s, end: s, percent: 0, assigneeId: draft.assigneeId, assigneeIds: [...ids(draft)], blocked: false }); renderActs(); };
   $("#btnDelAdd").onclick = () => { draft.deliverables.push({ id: uid(), name: "Nuevo entregable", due: span(draft)[1] || today, state: "pendiente", url: "" }); renderDel(); };
-  $("#btnActTpl").onclick = () => {
-    const c = (store.customTpl || []).find(x => x.id === $("#tplPick").value);
-    if (!draft.acts.length || confirm(`Esto reemplaza las actividades actuales por la plantilla${c ? ` "${c.name}"` : ""}. ¿Continuar?`)) { readForm(); draft.acts = fromTemplate(draft.acts[0]?.start || today, c?.acts); renderActs(); }
-  };
   $("#btnTplNew").onclick = () => {
     if (readOnly) return;
-    const name = (prompt("Nombre de la nueva plantilla de actividades:", "") || "").trim(); if (!name) return;
-    if ((store.customTpl ||= []).some(c => c.name.toLowerCase() === name.toLowerCase())) return say("Ya existe una plantilla con ese nombre.", 1);
-    store.customTpl.push({ id: uid(), name, acts: [{ name: "Nueva actividad", days: 1 }] }); save(); renderTpl(); say("Plantilla creada ✓");
+    const name = (prompt("Nombre del nuevo tipo de requerimiento (ej: QA Performance, Regresión):", "") || "").trim(); if (!name) return;
+    if ((store.customTpl ||= []).some(c => c.name.toLowerCase() === name.toLowerCase())) return say("Ya existe un tipo con ese nombre.", 1);
+    store.customTpl.push({ id: uid(), name, acts: [{ name: "Nueva actividad", days: 1 }] }); save(); renderTpl(); render(); say("Tipo creado ✓ (ya está disponible en el campo Tipo)");
   };
   $("#btnComment").onclick = addComment;
   $("#rform").onsubmit = submitReq;
