@@ -20,7 +20,9 @@
     <button data-v="resumen">Resumen</button>
     <button data-v="gantt">Gantt</button>
     <button data-v="team">Equipo</button>
+    <button data-v="leaders">Responsables de requerimiento</button>
     <button data-v="clients">Clientes</button>
+    <button data-v="avisos">Avisos</button>
     <button data-v="perm" id="tabPerm" hidden>Permisos</button>
     <button data-v="tpl">Plantilla de actividades</button>
   </nav>
@@ -28,11 +30,27 @@
   <label class="modeLbl">Modo
     <select id="mode"><option value="edit">Editor</option><option value="read">Solo lectura</option></select>
   </label>
-  <div class="themes" id="themes" role="group" aria-label="Tema de color">
-    <button type="button" data-t="sonda" title="Color Sonda" aria-label="Tema color Sonda"></button>
-    <button type="button" data-t="bn" title="Blanco y negro" aria-label="Tema blanco y negro"></button>
-    <button type="button" data-t="negro" title="Solo negro" aria-label="Tema solo negro"></button>
-  </div>
+  <details class="themepick" id="themes">
+    <summary aria-label="Cambiar el tema de colores"><span class="tsw" id="tswCur"></span><span id="tnameCur">Tema</span></summary>
+    <div class="tmenu" role="group" aria-label="Tema de color">
+      <button type="button" data-t="sonda" data-n="Sonda" data-bg="linear-gradient(135deg,#00e5ff 50%,#1f5df5 50%)"><span class="tsw" style="background:linear-gradient(135deg,#00e5ff 50%,#1f5df5 50%)"></span>Sonda</button>
+      <button type="button" data-t="bn" data-n="Blanco y negro" data-bg="linear-gradient(135deg,#fff 50%,#000 50%)"><span class="tsw" style="background:linear-gradient(135deg,#fff 50%,#000 50%)"></span>Blanco y negro</button>
+      <button type="button" data-t="negro" data-n="Solo negro" data-bg="#000"><span class="tsw" style="background:#000"></span>Solo negro</button>
+      <button type="button" data-t="cyberpunk" data-n="Cyberpunk" data-bg="linear-gradient(135deg,#ff2bd6 50%,#00f0ff 50%)"><span class="tsw" style="background:linear-gradient(135deg,#ff2bd6 50%,#00f0ff 50%)"></span>Cyberpunk</button>
+      <button type="button" data-t="colocolo" data-n="Colo-Colo" data-bg="linear-gradient(135deg,#fff 50%,#0b0b0b 50%)"><span class="tsw" style="background:linear-gradient(135deg,#fff 50%,#0b0b0b 50%)"></span>Colo-Colo</button>
+      <button type="button" data-t="uchile" data-n="U. de Chile" data-bg="linear-gradient(135deg,#0033a0 50%,#e4002b 50%)"><span class="tsw" style="background:linear-gradient(135deg,#0033a0 50%,#e4002b 50%)"></span>U. de Chile</button>
+      <button type="button" data-t="catolica" data-n="U. Católica" data-bg="linear-gradient(135deg,#0a3f7a 50%,#f2c200 50%)"><span class="tsw" style="background:linear-gradient(135deg,#0a3f7a 50%,#f2c200 50%)"></span>U. Católica</button>
+      <button type="button" data-t="oceano" data-n="Océano" data-bg="linear-gradient(135deg,#27d3c4 50%,#1e90ff 50%)"><span class="tsw" style="background:linear-gradient(135deg,#27d3c4 50%,#1e90ff 50%)"></span>Océano</button>
+      <button type="button" data-t="bosque" data-n="Bosque" data-bg="linear-gradient(135deg,#7be07d 50%,#2faa4f 50%)"><span class="tsw" style="background:linear-gradient(135deg,#7be07d 50%,#2faa4f 50%)"></span>Bosque</button>
+      <button type="button" data-t="atardecer" data-n="Atardecer" data-bg="linear-gradient(135deg,#ff8a3d 50%,#ff3d77 50%)"><span class="tsw" style="background:linear-gradient(135deg,#ff8a3d 50%,#ff3d77 50%)"></span>Atardecer</button>
+      <button type="button" data-t="wanderers" data-n="Wanderers" data-bg="linear-gradient(135deg,#00873e 50%,#fff 50%)"><span class="tsw" style="background:linear-gradient(135deg,#00873e 50%,#fff 50%)"></span>Wanderers</button>
+      <button type="button" data-t="clouddancer" data-n="Cloud Dancer" data-bg="linear-gradient(135deg,#f0eee9 50%,#4a5bd8 50%)"><span class="tsw" style="background:linear-gradient(135deg,#f0eee9 50%,#4a5bd8 50%)"></span>Cloud Dancer</button>
+      <button type="button" data-t="mocha" data-n="Mocha" data-bg="linear-gradient(135deg,#a47864 50%,#4a3328 50%)"><span class="tsw" style="background:linear-gradient(135deg,#a47864 50%,#4a3328 50%)"></span>Mocha</button>
+      <button type="button" data-t="aurora" data-n="Aurora" data-bg="linear-gradient(135deg,#8b7bff 50%,#3ee6b0 50%)"><span class="tsw" style="background:linear-gradient(135deg,#8b7bff 50%,#3ee6b0 50%)"></span>Aurora</button>
+      <button type="button" data-t="lavanda" data-n="Lavanda" data-bg="linear-gradient(135deg,#7a5af8 50%,#c06bff 50%)"><span class="tsw" style="background:linear-gradient(135deg,#7a5af8 50%,#c06bff 50%)"></span>Lavanda</button>
+      <button type="button" data-t="terminal" data-n="Terminal" data-bg="linear-gradient(135deg,#39ff6a 50%,#0a0f0a 50%)"><span class="tsw" style="background:linear-gradient(135deg,#39ff6a 50%,#0a0f0a 50%)"></span>Terminal</button>
+    </div>
+  </details>
   <div class="usermenu" id="userMenu" hidden>
     <button type="button" class="avatarBtn" id="avatarBtn" aria-haspopup="true" aria-expanded="false">
       <span class="avatar" id="avatar">?</span>
@@ -52,10 +70,9 @@
 <div class="actionbar" id="actionbar">
   <button id="btnNew" class="primary big"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg>Nuevo requerimiento</button>
   <div class="spacer"></div>
-  <button id="btnImportXls" class="ghost"><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M9 13l4 4M13 13l-4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Importar Excel/CSV</button>
-  <button id="btnImport" class="ghost"><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5M4 20h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Restaurar JSON</button>
-  <button id="btnExport" class="ghost"><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v12M7 11l5 5 5-5M4 20h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Respaldo JSON</button>
-  <input type="file" id="fileImport" accept=".json" hidden>
+  <button id="btnSync" class="ghost" hidden><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-15.5 6.2M3 12A9 9 0 0 1 18.5 5.8M18 2v4h-4M6 22v-4h4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Sincronizar Planner</button>
+  <button id="btnImportXls" class="ghost"><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M9 13l4 4M13 13l-4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Importar requerimientos Excel/CSV</button>
+  <button id="btnReport" class="ghost"><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M9 13h6M9 17h6M9 9h2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Descargar resumen de actividades (Word)</button>
 </div>
 <div id="msg" class="msg"></div>
 <section id="login" class="login-wrap" hidden>
@@ -71,14 +88,19 @@
 <div class="login-panel">
   <h2 id="loginTitle">Ingresar al Dashboard QA</h2>
   <p id="loginInfo" class="muted">Usa tu correo y contraseña.</p>
+  <div id="loginOk" class="loginOk" role="status" hidden></div>
   <div id="loginErr" class="loginErr" role="alert" hidden></div>
   <form id="loginForm" novalidate>
     <label>Correo <input type="email" name="email" autocomplete="username" placeholder="tu.correo@empresa.com"></label>
     <label id="pwRow">Contraseña <span class="pw"><input type="password" name="password" autocomplete="current-password"><button type="button" class="eye" title="Mostrar/ocultar" aria-label="Mostrar u ocultar contraseña">👁</button></span></label>
+    <label id="codeRow" hidden>Código de verificación <input type="text" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="12" placeholder="••••••" aria-label="Código de verificación"></label>
     <label id="pw2Row" hidden>Repite la contraseña <span class="pw"><input type="password" name="password2" autocomplete="new-password"><button type="button" class="eye" title="Mostrar/ocultar" aria-label="Mostrar u ocultar contraseña">👁</button></span></label>
+    <ul id="pwRules" class="pwRules" aria-live="polite" hidden>
+      <li data-r="len">Mínimo 8 caracteres</li><li data-r="up">Una mayúscula</li><li data-r="low">Una minúscula</li><li data-r="num">Un número</li><li data-r="sym">Un símbolo (por ejemplo ! @ # $ %)</li>
+    </ul>
     <button class="primary" id="loginBtn">Ingresar</button>
   </form>
-  <p class="loginLinks"><a href="#" id="lnkSignup">Crear cuenta</a><a href="#" id="lnkReset">Olvidé mi contraseña</a><a href="#" id="lnkBack" hidden>Volver a ingresar</a></p>
+  <p class="loginLinks"><a href="#" id="lnkSignup">Crear cuenta</a><a href="#" id="lnkReset">Olvidé mi contraseña</a><a href="#" id="lnkResend" class="off" hidden>Reenviar código</a><a href="#" id="lnkBack" hidden>Volver a ingresar</a></p>
 </div>
 </section>
 <div id="app">
@@ -87,10 +109,12 @@
   <div id="alerts" class="alerts"></div>
   <div class="kpis" id="kpis"></div>
   <div class="toolbar">
-    <select id="fType"><option value="">Todos los tipos</option><option value="express">QA Express</option><option value="trad">QA Tradicional</option></select>
-    <select id="fRole"><option value="">Todos los roles</option></select>
-    <select id="fAssignee"><option value="">Todo el equipo</option></select>
-    <select id="fStatus"><option value="">Todos los estados</option><option>Pendiente</option><option>En curso</option><option>Bloqueado</option><option>Completado</option></select>
+    <select id="fType" aria-label="Filtrar por tipo"><option value="">Todos los tipos</option><option value="express">QA Express</option><option value="trad">QA Tradicional</option></select>
+    <select id="fRole" aria-label="Filtrar por rol"><option value="">Todos los roles</option></select>
+    <select id="fAssignee" aria-label="Filtrar por integrante"><option value="">Todos los responsables QA</option></select>
+    <select id="fPrio" aria-label="Filtrar por prioridad"><option value="">Todas las prioridades</option><option>Urgente</option><option>Importante</option><option>Media</option><option>Baja</option></select>
+    <select id="fBucket" aria-label="Filtrar por etapa del proyecto"><option value="">Todas las etapas</option></select>
+    <select id="fStatus" aria-label="Filtrar por estado"><option value="">Todos los estados</option><option>Pendiente</option><option>En curso</option><option>Bloqueado</option><option>Completado</option></select>
     <input id="fText" type="search" placeholder="Buscar código, título o comentario…">
     <div class="spacer"></div>
     <button id="btnCsv">Exportar CSV</button>
@@ -130,10 +154,10 @@
 
 <section id="v-team" class="view" hidden>
   <div class="card">
-    <h2>Integrantes del equipo</h2>
-    <form id="memberForm" class="inline">
+    <h2>Responsables QA</h2>
+    <form id="memberForm" class="inline" novalidate>
       <input name="name" placeholder="Nombre" required>
-      <input name="email" type="email" placeholder="Correo (opcional)">
+      <input name="email" type="email" placeholder="Correo de Teams (para avisos)">
       <div id="memberRole"></div>
       <button class="primary" data-edit>Agregar</button>
     </form>
@@ -152,27 +176,57 @@
   </div>
 </section>
 
+<section id="v-leaders" class="view" hidden>
+  <div class="card">
+    <h2>Responsables de requerimiento</h2>
+    <p class="muted">Las personas que lideran o coordinan los requerimientos: líderes técnicos, jefaturas, coordinadores, DevOps, etc. Cada una puede tener uno o más roles. Se asignan a cada requerimiento desde su ventana, en el campo «Responsables de requerimiento».</p>
+    <form id="leaderForm" class="inline" novalidate>
+      <input name="name" placeholder="Nombre" required>
+      <input name="email" type="email" placeholder="Correo">
+      <div id="leaderRole"></div>
+      <button class="primary" data-edit>Agregar</button>
+    </form>
+    <div class="tablewrap" style="margin:0"><table id="leaderTbl"></table></div>
+  </div>
+  <div class="card">
+    <h2>Roles de los responsables de requerimiento</h2>
+    <p class="muted">Crea los roles que necesites (Líder técnico, Jefatura, Coordinador, DevOps, etc.). Después se los asignas a cada persona en la tabla de arriba.</p>
+    <form id="leaderRoleForm" class="inline"><input name="role" placeholder="Nuevo rol" required><button class="primary" data-edit>Crear rol</button></form>
+    <div class="tablewrap" style="margin:0"><table id="leaderRoleTbl"></table></div>
+  </div>
+</section>
+
 <section id="v-perm" class="view" hidden>
   <div class="card">
     <h2>Permisos de acceso</h2>
     <p class="muted">Solo el administrador ve esta pantalla. <b>Administrador</b>: edita todo y gestiona permisos. <b>Editor</b>: crea y modifica requerimientos. <b>Solo lectura</b>: únicamente ve. Quien no esté en la lista no puede ver nada.</p>
-    <form id="permForm" class="inline">
+    <form id="permForm" class="inline" novalidate>
       <input name="email" type="email" placeholder="correo@empresa.com" required>
       <select name="role"><option value="viewer">Solo lectura</option><option value="editor">Editor</option><option value="admin">Administrador</option></select>
       <button class="primary">Dar acceso</button>
     </form>
-    <p class="muted" id="permHint">Después de darle acceso, la persona debe entrar a la página y pulsar «Crear cuenta» con ese mismo correo (o créala tú en Supabase → Authentication → Users).</p>
+    <p class="muted" id="permHint">Quien pulsa «Crear cuenta» queda <b>Pendiente</b> y aparece primero en la lista: tú la autorizas (eligiendo su permiso) o la rechazas. También puedes darle acceso por adelantado con este formulario. A los 5 intentos fallidos de contraseña la cuenta se <b>bloquea</b> y solo tú puedes desbloquearla aquí.</p>
     <div class="tablewrap"><table id="permTbl"></table></div>
+  </div>
+  <div class="card" id="backupCard" hidden>
+    <h2>Copias de seguridad</h2>
+    <p class="muted">El sistema guarda una copia de todos los datos cada 6 horas (solo si hubo cambios) y conserva 45 días. Si alguien borra o daña información, restaura una copia aquí: antes de restaurar se guarda automáticamente el estado actual, así que puedes volver atrás.</p>
+    <div class="crow"><button type="button" class="primary" id="btnBackupNow">Crear copia ahora</button></div>
+    <div class="tablewrap"><table id="backupTbl"></table></div>
   </div>
 </section>
 
 <section id="v-clients" class="view" hidden>
   <div class="card">
     <h2>Clientes</h2>
-    <p class="muted">Cada cliente tiene sus propios requerimientos. El equipo y las plantillas se comparten entre clientes. Cambia de cliente con el selector del encabezado.</p>
+    <p class="muted">Cada cliente tiene sus propios requerimientos. El equipo y las plantillas se comparten entre clientes. Activa <b>Planner</b> para alimentar el dashboard desde el plan del cliente (solo lectura) y <b>Teams</b> para enviar avisos a su canal.</p>
     <form id="clientForm" class="inline"><input name="name" placeholder="Nuevo cliente (ej: Hites)" required><button class="primary" data-edit>Agregar cliente</button></form>
-    <table id="clientTbl"></table>
+    <div id="clientTbl" class="ccards"></div>
   </div>
+</section>
+
+<section id="v-avisos" class="view" hidden>
+  <div id="avisosBox"></div>
 </section>
 
 <section id="v-tpl" class="view" hidden>
@@ -204,6 +258,18 @@
       <div class="tablewrap" id="imWrap" hidden><table id="imTbl"></table></div>
     </div>
     <footer><span class="muted" id="imSum"></span><div class="spacer"></div><button type="button" id="imCancel">Cancelar</button><button type="button" class="primary" id="imOk" disabled>Importar</button></footer>
+  </form>
+</dialog>
+
+<dialog id="pickdlg" class="imdlg">
+  <form method="dialog" class="rform" onsubmit="return false">
+    <header><h2 id="pickTitle">Elegir requerimientos</h2><button type="button" id="pickClose" aria-label="Cerrar">✕</button></header>
+    <div class="pbody">
+      <p class="muted sm" id="pickHint"></p>
+      <div class="crow"><input type="search" id="pickQ" placeholder="Buscar por código, título o cliente" aria-label="Buscar requerimiento"><button type="button" id="pickAll">Marcar todos</button><button type="button" id="pickNone">Desmarcar todos</button></div>
+      <div id="pickList"></div>
+    </div>
+    <footer><span class="muted" id="pickCnt"></span><div class="spacer"></div><button type="button" id="pickCancel">Cancelar</button><button type="button" class="primary" id="pickOk">Descargar</button></footer>
   </form>
 </dialog>
 
@@ -239,6 +305,19 @@
         <label>Cumpleaños <input type="date" name="cumpleanos"></label>
         <label>Teléfono <input name="telefono" type="tel" autocomplete="tel" placeholder="+56 9 ..."></label>
       </div>
+      <details class="acct" id="pAccount" hidden>
+        <summary>Cuenta · Cambiar contraseña</summary>
+        <div class="acctBody">
+          <label>Contraseña actual <span class="pw"><input type="password" id="cpCur" autocomplete="current-password"><button type="button" class="eye" title="Mostrar/ocultar" aria-label="Mostrar u ocultar contraseña">👁</button></span></label>
+          <label>Repite la contraseña actual <span class="pw"><input type="password" id="cpCur2" autocomplete="current-password"><button type="button" class="eye" title="Mostrar/ocultar" aria-label="Mostrar u ocultar contraseña">👁</button></span></label>
+          <label>Nueva contraseña <span class="pw"><input type="password" id="cpNew" autocomplete="new-password"><button type="button" class="eye" title="Mostrar/ocultar" aria-label="Mostrar u ocultar contraseña">👁</button></span></label>
+          <label>Repite la nueva contraseña <span class="pw"><input type="password" id="cpNew2" autocomplete="new-password"><button type="button" class="eye" title="Mostrar/ocultar" aria-label="Mostrar u ocultar contraseña">👁</button></span></label>
+          <ul id="cpRules" class="pwRules" aria-live="polite">
+            <li data-r="len">Mínimo 8 caracteres</li><li data-r="up">Una mayúscula</li><li data-r="low">Una minúscula</li><li data-r="num">Un número</li><li data-r="sym">Un símbolo (por ejemplo ! @ # $ %)</li>
+          </ul>
+          <div class="acctAct"><button type="button" class="primary" id="cpSave">Cambiar contraseña</button></div>
+        </div>
+      </details>
     </div>
     <footer><div class="spacer"></div><button type="button" id="pCancel">Cerrar</button><button type="submit" class="primary" id="pSave">Guardar perfil</button></footer>
   </form>
@@ -251,14 +330,26 @@
       <div class="col">
         <p class="hint reqnote"><span class="star">*</span> Campo obligatorio. Los campos con error se marcan en rojo.</p>
         <label>Cliente <span class="star">*</span><select name="clientId" required></select></label>
-        <div class="row2"><label>Código <span class="star">*</span><input name="code" required placeholder="R1903"></label>
+        <div class="row2"><label>Código <span class="star">*</span><input name="code" required placeholder="R1903" maxlength="9" autocomplete="off" spellcheck="false" title="1 letra seguida de hasta 8 números"></label>
           <label>Tipo <select name="type"><option value="trad">QA Tradicional (Gantt)</option><option value="express">QA Express (rápido)</option></select></label></div>
-        <label>Título <span class="star">*</span><input name="title" required></label>
-        <div class="row2"><div class="lbl">Responsables<div id="assigneePick"></div></div>
-          <label>Estado <select name="status"><option>Pendiente</option><option>En curso</option><option>Bloqueado</option><option>Completado</option></select></label></div>
+        <label>Título <span class="star">*</span><input name="title" required maxlength="120" autocomplete="off" title="Letras, números, espacios y solo estos signos: ( ) # $ / -"></label>
+        <div id="srcBox" class="srcBox" hidden></div>
+        <div class="row2"><label>Prioridad<select name="priority"><option value="">— sin definir —</option><option>Urgente</option><option>Importante</option><option>Media</option><option>Baja</option></select></label>
+          <label>Etapa del proyecto<input name="bucket" list="bucketList" placeholder="Ej: Análisis, Certificación" maxlength="40" autocomplete="off" title="Solo letras y espacios"><datalist id="bucketList"></datalist></label></div>
+        <div class="row2"><div class="lbl">Responsables QA<div id="assigneePick"></div></div>
+          <div class="lbl">Responsables de requerimiento<div id="leaderPick"></div></div></div>
+        <div class="row2"><label>Estado <select name="status"><option>Pendiente</option><option>En curso</option><option>Bloqueado</option><option>Completado</option></select></label><div></div></div>
         <div id="commitBox" class="commitBox" hidden></div>
         <div class="row2" id="datesRow"><label>Inicio <input type="date" name="start"></label><label>Fin <input type="date" name="end"></label></div>
         <label id="pctRow">Avance % (express) <input type="number" name="percent" min="0" max="100" step="any"></label>
+      </div>
+      <div class="col">
+        <h3>Seguimiento / comentarios</h3>
+        <div id="thread" class="thread"></div>
+        <div class="newc"><textarea id="newComment" rows="3" placeholder="Escribe un avance, bloqueo o acuerdo…"></textarea>
+          <button type="button" id="btnComment" class="primary">Agregar comentario</button></div>
+      </div>
+      <div class="col wide">
         <div id="actsBox">
           <h3>Actividades <span class="star">*</span> <button type="button" id="btnActAdd" data-edit>+</button></h3>
           <table id="actTbl"></table>
@@ -285,12 +376,6 @@
           <p class="muted" id="metCalc"></p>
         </div>
       </div>
-      <div class="col">
-        <h3>Seguimiento / comentarios</h3>
-        <div id="thread" class="thread"></div>
-        <div class="newc"><textarea id="newComment" rows="3" placeholder="Escribe un avance, bloqueo o acuerdo…"></textarea>
-          <button type="button" id="btnComment" class="primary">Agregar comentario</button></div>
-      </div>
     </div>
     <footer>
       <button type="button" id="rDelete" class="danger" data-edit>Eliminar</button>
@@ -303,8 +388,11 @@
 
 </div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.3/lib/msal-browser.min.js"></script>
 <script src="config.js"></script>
 <script src="data.js"></script>
+<script src="planner.js"></script>
+<script src="report.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

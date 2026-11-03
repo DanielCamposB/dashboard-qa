@@ -26,7 +26,14 @@
   });
   const defaultRoles = () => ["QA Funcional", "QA Automatizador"];
   const emptyStore = () => ({ clients: [], members: [], roles: defaultRoles(), templates: defaultTemplates(), reqs: [] });
-  const normalize = o => { o.roles ||= defaultRoles(); o.templates ||= defaultTemplates(); o.templates.express ||= defaultTemplates().express; o.customTpl ||= []; o.members ||= []; o.reqs ||= []; o.clients ||= []; if (!o.clients.length) o.clients.push({ id: uid(), name: "General" }); o.reqs.forEach(r => { if (!o.clients.some(c => c.id === r.clientId)) r.clientId = o.clients[0].id; r.comments ||= []; r.acts ||= []; r.deliverables ||= []; r.metrics ||= {}; r.dateLog ||= []; r.committedEnd ||= r.end; r.lastUpdate ||= (r.comments.length ? r.comments[r.comments.length - 1].at : new Date().toISOString()); r.acts.forEach(a => { a.blockReason ||= ""; a.blockedSince ||= ""; }); }); o.members.forEach(m => { m.roles ||= m.role ? [m.role] : []; delete m.role; }); return o; };
+  const normalize = o => { o.roles ||= defaultRoles(); o.templates ||= defaultTemplates(); o.templates.express ||= defaultTemplates().express; o.customTpl ||= []; ["trad", "express"].forEach(k => o.templates[k].forEach(t => { t.unit ||= "d"; })); o.customTpl.forEach(c => (c.acts ||= []).forEach(t => { t.unit ||= "d"; })); o.members ||= []; o.leaders ||= []; if (!Array.isArray(o.leaderRoles)) o.leaderRoles = ["Líder técnico", "Líder de proyecto", "Coordinador", "Jefatura", "DevOps"]; o.reqs ||= []; o.clients ||= []; if (!o.clients.length) o.clients.push({ id: uid(), name: "General" }); o.reqs.forEach(r => { if (!o.clients.some(c => c.id === r.clientId)) r.clientId = o.clients[0].id; r.comments ||= []; r.leaderIds ||= []; r.acts ||= []; r.deliverables ||= []; r.metrics ||= {}; r.dateLog ||= []; r.committedEnd ||= r.end; r.lastUpdate ||= (r.comments.length ? r.comments[r.comments.length - 1].at : new Date().toISOString()); r.acts.forEach(a => { a.blockReason ||= ""; a.blockedSince ||= ""; }); }); o.members.forEach(m => { m.roles ||= m.role ? [m.role] : []; delete m.role; }); o.notify ||= {}; o.notify.times ||= ["09:00", "12:00", "15:00", "18:00"]; o.notify.days ||= [1, 2, 3, 4, 5]; o.notify.userWebhook ||= ""; o.notify.siteUrl ||= ""; o.clients.forEach(c => { c.planner ||= { enabled: false, planId: "", planName: "", lastSync: "" }; c.teams ||= { enabled: false, webhook: "", events: { sync: true, blocked: true } }; }); o.reqs.forEach(r => { r.priority ||= ""; r.bucket ||= ""; r.id ||= uid(); r.type ||= "trad"; r.status ||= "Pendiente"; r.code = String(r.code ?? ""); r.title = String(r.title ?? "");
+      r.acts.forEach(a => { a.id ||= uid(); a.name = String(a.name ?? ""); a.percent = Math.max(0, Math.min(100, +a.percent || 0)); });
+      const okd = s => /^\d{4}-\d{2}-\d{2}$/.test(s || ""), t0 = new Date().toISOString().slice(0, 10);
+      if (!okd(r.start)) r.start = r.acts.map(a => a.start).filter(okd).sort()[0] || t0; if (!okd(r.end)) r.end = r.acts.map(a => a.end).filter(okd).sort().pop() || r.start;
+      r.acts.forEach(a => { if (!okd(a.start)) a.start = r.start; if (!okd(a.end)) a.end = a.start; }); });
+    o.members.forEach(m => { m.id ||= uid(); m.name = String(m.name ?? ""); m.email = String(m.email ?? ""); }); o.clients.forEach(c => { c.id ||= uid(); c.teams.events ||= { sync: true, blocked: true }; });
+    o.leaders.forEach(l => { l.id ||= uid(); l.name = String(l.name ?? ""); l.email = String(l.email ?? ""); l.roles ||= []; });
+    return o; };
 
   function seed() {
     const t = iso(new Date(Date.now() - new Date().getTimezoneOffset() * 60000));
@@ -104,9 +111,17 @@
     if (!session) return { needLogin: true };
     if (/type=recovery/.test(location.hash)) return { needLogin: true, recovery: true };
     userEmail = (session.user.email || "").toLowerCase();
-    const { data: prof, error } = await sb.from("profiles").select("*").eq("email", userEmail).maybeSingle();
+    let { data: prof, error } = await sb.from("profiles").select("*").eq("email", userEmail).maybeSingle();
     if (error) throw error;
-    if (!prof) return { denied: true, user: userEmail };
+    if (!prof) {                                   // primera vez: queda como solicitud pendiente hasta que un administrador la autorice
+      const { error: e2 } = await sb.rpc("request_access");
+      if (e2) return { denied: true, user: userEmail };
+      ({ data: prof } = await sb.from("profiles").select("*").eq("email", userEmail).maybeSingle());
+      if (!prof) return { denied: true, user: userEmail };
+    }
+    if (prof.role === "pending") return { pending: true, user: userEmail };
+    if (prof.locked && (prof.role !== "admin" || Date.now() - new Date(prof.locked_at || 0).getTime() < 15 * 60e3)) return { locked: true, user: userEmail };
+    sb.rpc("login_ok").then(() => {}, () => {});   // ingreso correcto: reinicia el contador de intentos
     canEdit = prof.role === "editor" || prof.role === "admin"; profile = prof;
     let store = await fetchState();
     if (!store) { store = canEdit ? seedOrEmpty() : emptyStore(); if (canEdit) { pending = store; await pushNow(); } }
@@ -146,6 +161,28 @@
     if (error) throw error;
     return !!data.session;                       // true si no requiere confirmar correo
   };
+  const rpc = async (fn, args) => { const { data, error } = await sb.rpc(fn, args); if (error) throw error; return data; };
+  D.precheck = async email => { try { return await rpc("login_precheck", { p_email: email }); } catch { return "ok"; } };       // sin el SQL de acceso, no bloquea
+  D.loginFailed = async email => { try { return await rpc("login_failed", { p_email: email }); } catch { return null; } };
+  D.unlock = async email => { await rpc("admin_unlock", { p_email: email }); };
+  // Webhooks de Teams: las URLs viven en la tabla notify_secrets (solo administradores). Los avisos los publica el servidor.
+  D.setSecret = async (key, value) => {
+    const { error } = value ? await sb.from("notify_secrets").upsert({ key, value, updated_at: new Date().toISOString() }) : await sb.from("notify_secrets").delete().eq("key", key);
+    if (error) throw error;
+  };
+  D.qaPost = a => rpc("qa_post", { p_target: a.target, p_title: a.title, p_facts: a.facts, p_lines: a.lines, p_to: a.to || null, p_name: a.name || null });
+  D.listBackups = () => rpc("qa_backups_list");
+  D.makeBackup = () => rpc("qa_backup_now");
+  D.restoreBackup = id => rpc("qa_restore_backup", { p_id: id });
+  D.signOutQuiet = async () => { try { await sb.auth.signOut(); } catch {} };
+  D.sendResetCode = async email => {               // el correo lleva un código (plantilla «Reset Password» con {{ .Token }}, ver README)
+    const { error } = await sb.auth.resetPasswordForEmail(email);
+    if (error) throw error;
+  };
+  D.verifyResetCode = async (email, token) => {
+    const { error } = await sb.auth.verifyOtp({ email, token, type: "recovery" });
+    if (error) throw error;
+  };
   D.resetPassword = async email => {
     const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
     if (error) throw error;
@@ -154,6 +191,13 @@
     const { error } = await sb.auth.updateUser({ password });
     if (error) throw error;
   };
+  D.changePassword = async (current, password) => {          // confirma la contraseña actual antes de cambiarla
+    const { error: e1 } = await sb.auth.signInWithPassword({ email: userEmail, password: current });
+    if (e1) throw new Error("current");
+    await D.updatePassword(password);
+  };
+  D.qaComment = (rid, c) => rpc("qa_comment", { p_req: rid, p_id: c.id, p_by: c.by, p_text: c.text });
+  D.qaCommentEdit = (rid, id, by, text) => rpc("qa_comment_edit", { p_req: rid, p_id: id, p_by: by, p_text: text });
   D.logout = async () => { await sb.auth.signOut(); location.reload(); };
   D.exportJson = function (store) {
     const a = document.createElement("a");
@@ -161,5 +205,6 @@
     a.download = `qa-dashboard-${iso(new Date())}.json`; a.click();
   };
 
+  D.normalize = normalize;
   window.QA_DATA = D;
 })();
