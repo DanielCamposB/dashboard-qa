@@ -6,15 +6,26 @@
   const n2d = n => new Date(n * DAY).toISOString().slice(0, 10);
   const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const say = (m, err) => {
-    const e = $("#msg"); e.textContent = m || ""; e.className = "msg" + (err ? " err" : ""); if (m && !err) setTimeout(() => say(""), 1800);
     if (m) toast(m, err);
   };
+  // último control que tocó la persona: los avisos salen justo encima de él
+  let anchor = null;
+  const setAnchor = e => { const c = e.target.closest?.("button, input, select, textarea, summary, a"); if (c && !c.closest(".toast")) anchor = { el: c, rect: c.getBoundingClientRect(), at: Date.now() }; };
+  document.addEventListener("pointerdown", setAnchor, true); document.addEventListener("focusin", setAnchor, true);
   // Aviso visible también sobre ventanas modales (el #msg de la página queda tapado por ellas)
   function toast(m, err) {
     const open = [...document.querySelectorAll("dialog[open]")].pop();
     const t = document.createElement("div"); t.className = "toast" + (err ? " err" : ""); t.setAttribute("role", "alert"); t.textContent = m;
     t.onclick = () => t.remove();
-    (open || document.body).append(t); setTimeout(() => t.remove(), err ? 9000 : 2200);
+    (open || document.body).append(t); setTimeout(() => t.remove(), err ? 9000 : 3200);
+    const rect = anchor && Date.now() - anchor.at < 30000 && (anchor.el.isConnected ? anchor.el.getBoundingClientRect() : anchor.rect);
+    if (rect && rect.width && rect.bottom > 0 && rect.top < innerHeight) {       // pegado encima del control (o debajo si no hay espacio arriba)
+      t.classList.add("anch"); t.style.left = "0px"; t.style.top = "0px"; t.style.bottom = "auto";       // estilo final antes de medir
+      const w = t.offsetWidth, h = t.offsetHeight, x = Math.min(Math.max(rect.left + rect.width / 2, w / 2 + 8), innerWidth - w / 2 - 8);
+      const above = rect.top - h - 12 >= 8;
+      t.classList.add("anch", above ? "up" : "down"); t.style.left = x + "px"; t.style.top = (above ? rect.top - h - 12 : rect.bottom + 12) + "px"; t.style.bottom = "auto";
+      t.style.setProperty("--ax", Math.min(Math.max(rect.left + rect.width / 2 - (x - w / 2), 14), w - 14) + "px");
+    }
   }
   const errText = e => (e && (e.message || e.error_description || e.details)) || String(e);
   window.addEventListener("error", ev => { console.error(ev.error || ev.message); toast("Error: " + (ev.message || errText(ev.error)), 1); });
@@ -33,6 +44,7 @@
     if (/signups? not allowed|signup is disabled/i.test(m)) return "El registro de cuentas está deshabilitado. Pide al administrador que te cree el usuario.";
     if (/invalid email|unable to validate email/i.test(m)) return "El correo no tiene un formato válido.";
     if (/failed to fetch|networkerror|load failed/i.test(m)) return "No hay conexión con el servidor. Revisa tu internet e inténtalo de nuevo.";
+    if (/token has expired|otp|token.*(invalid|expired)|invalid.*token/i.test(m)) return "El código es incorrecto o ya venció. Revísalo o pide uno nuevo.";
     if (/jwt|session|expired/i.test(m)) return "El enlace expiró o ya fue usado. Solicita uno nuevo.";
     return "Error: " + m;
   };
@@ -44,56 +56,117 @@
     pts.forEach(p => (s += `<circle cx="${p.x}" cy="${p.y}" r="${p.r}" fill="#00ffff" class="nd" style="animation-delay:${p.d.toFixed(1)}s"/>`));
     $("#heroArt").innerHTML = s;
   }
+  // Error pegado justo ENCIMA del campo que falla (y el campo se marca en rojo). msg vacío = limpiar.
+  const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+  function fieldErr(el, msg) {
+    const host = el.closest("label") || (el.closest("form.inline") || el);
+    let b = host.previousElementSibling;
+    if (!b || !b.classList.contains("ferr")) { if (!msg) return; b = document.createElement("div"); b.className = "ferr"; b.setAttribute("role", "alert"); host.before(b); }
+    b.textContent = msg || ""; b.hidden = !msg; el.classList.toggle("bad", !!msg);
+    if (msg) { el.focus({ preventScroll: false }); el.addEventListener("input", () => fieldErr(el, ""), { once: true }); }
+  }
   function showLogin(boot) {
     $("#login").hidden = false; $("#app").hidden = true; document.querySelector("header.top").hidden = true; $("#actionbar").hidden = true;
     document.body.classList.add("on-login"); drawArt();
     const f = $("#loginForm"), err = $("#loginErr"), info = $("#loginInfo");
-    let mode = boot.recovery ? "newpw" : "login";
-    const showErr = t => { err.textContent = t; err.hidden = !t; };
-    const setMode = m => {
-      mode = m; showErr("");
-      const t = { login: ["Ingresar al Dashboard QA", "Usa tu correo y contraseña.", "Ingresar"], signup: ["Crear cuenta", "Usa tu correo corporativo. Un administrador debe autorizar tu acceso después.", "Crear cuenta"],
-        reset: ["Recuperar contraseña", "Te enviaremos un enlace para crear una contraseña nueva.", "Enviar enlace"], newpw: ["Nueva contraseña", "Escribe tu nueva contraseña (mínimo 8 caracteres).", "Guardar contraseña"] }[m];
-      $("#loginTitle").textContent = t[0]; info.textContent = t[1]; $("#loginBtn").textContent = t[2];
-      f.email.parentElement.hidden = m === "newpw"; $("#pwRow").hidden = m === "reset"; $("#pw2Row").hidden = !(m === "signup" || m === "newpw");
-      f.password.autocomplete = m === "login" ? "current-password" : "new-password";
-      $("#lnkSignup").hidden = m !== "login"; $("#lnkReset").hidden = m === "reset" || m === "newpw"; $("#lnkBack").hidden = m === "login";
+    let mode = boot.recovery ? "newpw" : "login", resetEmail = "", tick = null;
+    const showErr = (t, el) => {
+      f.querySelectorAll(".ferr").forEach(x => (x.hidden = true)); f.querySelectorAll(".bad").forEach(x => x.classList.remove("bad"));
+      if (el && t) { err.hidden = true; fieldErr(el, t); } else { err.textContent = t; err.hidden = !t; }
     };
+    const showOk = t => { $("#loginOk").textContent = t; $("#loginOk").hidden = !t; };
+    const RULES = { len: p => p.length >= 8, up: p => /\p{Lu}/u.test(p), low: p => /\p{Ll}/u.test(p), num: p => /\d/.test(p), sym: p => /[^\p{L}\p{N}\s]/u.test(p) };
+    const RULE_TXT = { len: "al menos 8 caracteres", up: "una mayúscula", low: "una minúscula", num: "un número", sym: "un símbolo" };
+    const pwMissing = p => Object.keys(RULES).filter(k => !RULES[k](p));
+    const updRules = () => document.querySelectorAll("#pwRules li").forEach(li => { const ok = RULES[li.dataset.r](f.password.value); li.classList.toggle("ok", ok); li.dataset.s = ok ? "✓" : "✗"; });
+    const LOCKED = "Tu cuenta está bloqueada por superar los 5 intentos permitidos. Pide a un administrador que la desbloquee en Permisos.";
+    const maskMail = e => e.replace(/^(.).*(@.*)$/, "$1•••$2");
+    const T = {
+      login: ["Ingresar al Dashboard QA", "Usa tu correo y contraseña.", "Ingresar"],
+      signup: ["Crear cuenta", "Usa tu correo corporativo. Un administrador debe autorizar tu acceso antes de que puedas entrar.", "Crear cuenta"],
+      reset: ["Recuperar contraseña", "Escribe tu correo y te enviaremos un código de verificación.", "Enviar código"],
+      code: ["Verifica tu identidad", "", "Verificar código"],
+      newpw: ["Nueva contraseña", "Escribe tu nueva contraseña (mínimo 8 caracteres).", "Guardar contraseña"]
+    };
+    const stopTick = () => { clearInterval(tick); tick = null; };
+    const startCooldown = (s = 60) => {
+      const a = $("#lnkResend"); stopTick(); a.classList.add("off"); a.textContent = `Reenviar código (${s} s)`;
+      tick = setInterval(() => { s--; if (s <= 0) { stopTick(); a.classList.remove("off"); a.textContent = "Reenviar código"; } else a.textContent = `Reenviar código (${s} s)`; }, 1000);
+    };
+    // Cada cambio de pantalla deja los campos limpios (salvo al avanzar dentro del mismo trámite: keep)
+    const setMode = (m, keep) => {
+      mode = m; showErr(""); showOk(""); stopTick();
+      if (!keep) { f.reset(); resetEmail = ""; }
+      f.querySelectorAll(".pw input").forEach(i => (i.type = "password")); f.querySelectorAll(".eye").forEach(b => b.classList.remove("on"));
+      const t = T[m];
+      $("#loginTitle").textContent = t[0]; info.textContent = m === "code" ? `Enviamos un código de verificación a ${maskMail(resetEmail)}. Revisa tu bandeja de entrada (y spam); vence en pocos minutos.` : t[1]; $("#loginBtn").textContent = t[2];
+      f.email.parentElement.hidden = !(m === "login" || m === "signup" || m === "reset");
+      $("#pwRow").hidden = !(m === "login" || m === "signup" || m === "newpw"); $("#pw2Row").hidden = !(m === "signup" || m === "newpw"); $("#codeRow").hidden = m !== "code";
+      f.password.autocomplete = m === "login" ? "current-password" : "new-password";
+      $("#pwRules").hidden = !(m === "signup" || m === "newpw"); updRules();
+      $("#lnkSignup").hidden = m !== "login"; $("#lnkReset").hidden = !(m === "login" || m === "signup"); $("#lnkBack").hidden = m === "login"; $("#lnkResend").hidden = m !== "code";
+      if (m === "code") { $("#lnkResend").classList.add("off"); f.code.focus(); }
+    };
+    f.password.addEventListener("input", updRules);
     document.querySelectorAll("#loginForm .eye").forEach(b => (b.onclick = () => { const i = b.previousElementSibling, show = i.type === "password"; i.type = show ? "text" : "password"; b.classList.toggle("on", show); }));
     $("#lnkSignup").onclick = e => { e.preventDefault(); setMode("signup"); };
     $("#lnkReset").onclick = e => { e.preventDefault(); setMode("reset"); };
-    $("#lnkBack").onclick = e => { e.preventDefault(); setMode("login"); };
-    if (boot.denied) {
-      info.textContent = `Tu correo (${boot.user}) no tiene acceso. Pide a un administrador que te agregue.`; f.hidden = true; document.querySelector(".loginLinks").hidden = true;
-      const b = document.createElement("button"); b.textContent = "Cerrar sesión"; b.onclick = D.logout; $("#login .login-panel").append(b); return;
-    }
-    setMode(mode);
+    $("#lnkBack").onclick = async e => { e.preventDefault(); if (mode === "newpw" || mode === "code") await D.signOutQuiet(); setMode("login"); };
+    $("#lnkResend").onclick = async e => {
+      e.preventDefault(); if ($("#lnkResend").classList.contains("off")) return;
+      try { await D.sendResetCode(resetEmail); showErr(""); startCooldown(); info.textContent = `Enviamos un código nuevo a ${maskMail(resetEmail)}.`; } catch (er) { showErr(errEs(er)); }
+    };
+    // Pantallas de estado: sin acceso, solicitud pendiente o cuenta bloqueada
+    const stateScreen = (title, text) => {
+      f.hidden = true; document.querySelector(".loginLinks").hidden = true; $("#loginTitle").textContent = title; info.textContent = text;
+      const mk = (label, fn) => { const b = document.createElement("button"); b.textContent = label; b.onclick = fn; $("#login .login-panel").append(b); };
+      if (boot.pending) mk("Revisar de nuevo", () => location.reload());
+      mk("Cerrar sesión", D.logout);
+    };
+    if (boot.denied) return stateScreen("Sin acceso", `Tu correo (${boot.user}) no tiene acceso. Pide a un administrador que te agregue.`);
+    if (boot.pending) return stateScreen("Solicitud en revisión", `Tu cuenta (${boot.user}) fue creada y está esperando la autorización de un administrador. Cuando la apruebe podrás ingresar con el mismo correo y contraseña.`);
+    if (boot.locked) return stateScreen("Cuenta bloqueada", `La cuenta ${boot.user} fue bloqueada por superar los 5 intentos de contraseña. Un administrador debe desbloquearla en Permisos.`);
+    setMode(mode, true);
     if (boot.initError) showErr(errEs(boot.initError));
     f.onsubmit = async e => {
       e.preventDefault(); showErr("");
       const email = f.email.value.trim(), pw = f.password.value, pw2 = f.password2.value;
-      if (mode !== "newpw") { if (!email) return showErr("Escribe tu correo."); if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return showErr("El correo no tiene un formato válido."); }
-      if (mode !== "reset" && !pw) return showErr("Escribe tu contraseña.");
-      if (mode === "signup" || mode === "newpw") { if (pw.length < 8) return showErr("La contraseña debe tener al menos 8 caracteres."); if (pw !== pw2) return showErr("Las contraseñas no coinciden."); }
+      if (mode === "login" || mode === "signup" || mode === "reset") { if (!email) return showErr("Escribe tu correo.", f.email); if (!EMAIL_RE.test(email)) return showErr("El correo no tiene un formato válido (ejemplo: nombre@ips.gob.cl).", f.email); }
+      if ((mode === "login" || mode === "signup" || mode === "newpw") && !pw) return showErr("Escribe tu contraseña.", f.password);
+      if (mode === "signup" || mode === "newpw") { { const miss = pwMissing(pw); if (miss.length) return showErr("La contraseña debe tener " + miss.map(k => RULE_TXT[k]).join(", ") + ".", f.password); } if (pw !== pw2) return showErr("Las contraseñas no coinciden.", f.password2); }
+      const code = f.code.value.replace(/\s/g, "");
+      if (mode === "code" && !/^\d{6,10}$/.test(code)) return showErr("Escribe el código que llegó a tu correo (solo números).", f.code);
       const btn = $("#loginBtn"); btn.disabled = true;
       try {
-        if (mode === "login") { await D.login(email, pw); location.reload(); }
-        else if (mode === "signup") { const inSession = await D.signUp(email, pw); if (inSession) location.reload(); else { setMode("login"); info.textContent = "Cuenta creada. Revisa tu correo y confirma el enlace; luego ingresa."; } }
-        else if (mode === "reset") { await D.resetPassword(email); setMode("login"); info.textContent = "Te enviamos un enlace para cambiar tu contraseña. Revisa tu correo (y spam)."; }
+        if (mode === "login") {
+          if (await D.precheck(email) === "locked") throw { locked: true };
+          try { await D.login(email, pw); }
+          catch (er) {
+            if (!/invalid login credentials/i.test(String(er?.message))) throw er;
+            const r = await D.loginFailed(email), left = r?.remaining;
+            throw { custom: r?.locked ? LOCKED : (r?.known && left <= 2 ? `Correo o contraseña incorrectos. ${left === 1 ? "Te queda 1 intento" : `Te quedan ${left} intentos`} antes de que la cuenta se bloquee.` : "Correo o contraseña incorrectos.") };
+          }
+          location.reload();
+        }
+        else if (mode === "signup") { const inSession = await D.signUp(email, pw); if (inSession) location.reload(); else { setMode("login"); showOk("✓ Cuenta creada. Falta un paso: confirma tu correo con el enlace que te enviamos (revisa spam). Después, tu acceso quedará en espera hasta que un administrador lo autorice."); } }
+        else if (mode === "reset") { await D.sendResetCode(email); resetEmail = email.toLowerCase(); setMode("code", true); startCooldown(); }
+        else if (mode === "code") { await D.verifyResetCode(resetEmail, code); setMode("newpw", true); info.textContent = "Código verificado ✓ Ahora crea tu nueva contraseña."; }
         else { await D.updatePassword(pw); history.replaceState(null, "", location.pathname); location.reload(); }
-      } catch (er) { showErr(errEs(er)); }
+      } catch (er) { er?.custom ? showErr(er.custom, f.password) : showErr(er?.locked ? LOCKED : errEs(er)); }
       btn.disabled = false;
     };
   }
   const boot = await D.init().catch(e => ({ needLogin: true, initError: e }));
-  if (boot.needLogin || boot.denied) { showLogin(boot); return; }
+  if (boot.needLogin || boot.denied || boot.pending || boot.locked) { showLogin(boot); return; }
   let store = boot.store, readOnly = boot.forceRead ?? (lsGet("qa-mode", "edit") === "read"), pxDay = +lsGet("qa-zoom", 14), draft = null, isNew = false;
+  let PL = null;                                       // módulo Planner/Teams (planner.js)
   const save = () => D.save(store);
   let clientId = lsGet("qa-client", "all");
   const clientName = id => store.clients.find(c => c.id === id)?.name || "—";
   const scoped = () => (clientId === "all" ? store.reqs : store.reqs.filter(r => r.clientId === clientId));
   const memberRoles = id => store.members.find(m => m.id === id)?.roles || [];
-  const pick = (attr, sel, off) => `<details class="rolepick"><summary>${sel.length ? esc(sel.join(", ")) : "Sin rol"}</summary><div class="rpmenu">${store.roles.length ? store.roles.map(r => `<label><input type="checkbox" ${attr} value="${esc(r)}"${sel.includes(r) ? " checked" : ""}${off ? " disabled" : ""}> ${esc(r)}</label>`).join("") : '<small class="muted">Crea un rol primero</small>'}</div></details>`;
+  const chips = l => l.map(s => `<span class="chip">${esc(s)}</span>`).join("");
+  const pick = (attr, sel, off) => `<details class="rolepick"><summary>${sel.length ? chips(sel) : "Sin rol"}</summary><div class="rpmenu">${store.roles.length ? store.roles.map(r => `<label><input type="checkbox" ${attr} value="${esc(r)}"${sel.includes(r) ? " checked" : ""}${off ? " disabled" : ""}> ${esc(r)}</label>`).join("") : '<small class="muted">Crea un rol primero</small>'}</div></details>`;
   const mname = id => store.members.find(m => m.id === id)?.name || "—";
   // Responsables: lista (assigneeIds); assigneeId se mantiene como el primero por compatibilidad con datos antiguos
   const ids = x => (x?.assigneeIds?.length ? x.assigneeIds : x?.assigneeId ? [x.assigneeId] : []).filter(i => store.members.some(m => m.id === i));
@@ -107,7 +180,12 @@
   const typeOpts = (first, base) => (first ? `<option value="">${first}</option>` : "") + (base ? `<option value="trad">QA Tradicional (Gantt)</option><option value="express">QA Express (rápido)</option>` : `<option value="express">QA Express</option><option value="trad">QA Tradicional</option>`) + (store.customTpl || []).map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
   const setIds =(x, l) => { x.assigneeIds = l; x.assigneeId = l[0] || ""; };
   const rolesOf = x => [...new Set(ids(x).flatMap(memberRoles))];
-  const memberPick = (attr, sel, off) => `<details class="rolepick"><summary>${sel.length ? esc(sel.map(mname).join(", ")) : "Sin asignar"}</summary><div class="rpmenu">${store.members.length ? store.members.map(m => `<label><input type="checkbox" ${attr} value="${m.id}"${sel.includes(m.id) ? " checked" : ""}${off ? " disabled" : ""}> ${esc(m.name)}${m.roles.length ? " · " + esc(m.roles.join(", ")) : ""}</label>`).join("") : '<small class="muted">Agrega miembros en Equipo</small>'}</div></details>`;
+  // selector múltiple de personas (responsables QA o responsables de requerimiento): los elegidos se ven como etiquetas que se acomodan sin solaparse
+  const idPick = (list, attr, sel, off, emptyMsg) => `<details class="rolepick"><summary>${sel.length ? chips(sel.map(i => list.find(m => m.id === i)?.name || "—")) : "Sin asignar"}</summary><div class="rpmenu">${list.length ? list.map(m => `<label><input type="checkbox" ${attr} value="${m.id}"${sel.includes(m.id) ? " checked" : ""}${off ? " disabled" : ""}> ${esc(m.name)}${(m.roles || []).length ? " · " + esc(m.roles.join(", ")) : ""}</label>`).join("") : `<small class="muted">${emptyMsg}</small>`}</div></details>`;
+  const memberPick = (attr, sel, off) => idPick(store.members, attr, sel, off, "Agrega miembros en Equipo");
+  const lpick = (attr, sel, off) => `<details class="rolepick"><summary>${sel.length ? chips(sel) : "Sin rol"}</summary><div class="rpmenu">${store.leaderRoles.length ? store.leaderRoles.map(r => `<label><input type="checkbox" ${attr} value="${esc(r)}"${sel.includes(r) ? " checked" : ""}${off ? " disabled" : ""}> ${esc(r)}</label>`).join("") : '<small class="muted">Crea un rol primero</small>'}</div></details>`;
+  const leaderIds = r => (r.leaderIds || []).filter(i => store.leaders.some(l => l.id === i));
+  const lnames = r => leaderIds(r).map(i => store.leaders.find(l => l.id === i).name).join(", ");
 
   // ---------- cálculos ----------
   const span = r => r.acts.length ? [r.acts.map(a => a.start).sort()[0], r.acts.map(a => a.end).sort().pop()] : [r.start, r.end];
@@ -132,7 +210,7 @@
     }
     return out.sort((a, b) => b.d - a.d);
   }
-  const lastComment = r => r.comments.length ? r.comments[r.comments.length - 1] : null;
+  const lastComment = r => (r.comments.length ? r.comments.reduce((m, c) => (c.at > m.at ? c : m)) : null);
 
   // ---------- seguimiento: última actualización, compromiso, check-in ----------
   const STALE = 2;                                   // días hábiles sin actualizar para alertar
@@ -178,8 +256,10 @@
 
   // ---------- navegación / modo ----------
   function setView(v) {
+    if (v === "dash" && $("#v-dash").hidden) alertsOpen = false;     // al volver al Dashboard, las alertas vuelven a estar cerradas
     document.querySelectorAll(".view").forEach(e => (e.hidden = e.id !== "v-" + v));
     document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.v === v));
+    document.querySelector("#tabs button.on")?.scrollIntoView({ inline: "center", block: "nearest" });   // en móvil la pestaña activa queda a la vista
     render();
   }
   const fullName = () => { const p = D.getProfile(); return [p.nombres, p.apellido_paterno, p.apellido_materno].filter(Boolean).join(" "); };
@@ -210,8 +290,31 @@
     f.email.value = boot.user || "(modo local)";
     ["nombres", "apellido_paterno", "apellido_materno", "cargo", "vertical", "cumpleanos", "telefono"].forEach(k => (f[k].value = p[k] ?? ""));
     $("#pErr").hidden = true; $("#pAdminBadge").hidden = !D.isAdmin();
+    $("#pAccount").hidden = !D.remote; $("#pAccount").open = false; ["#cpCur", "#cpCur2", "#cpNew", "#cpNew2"].forEach(s => { $(s).value = ""; $(s).type = "password"; $(s).classList.remove("bad"); }); updCpRules();
     $("#pHint").textContent = first ? "Bienvenido/a. Completa tu perfil para que el equipo te identifique. Puedes editarlo después desde «Mi perfil»." : "Esta información identifica a cada integrante del equipo.";
     $("#pdlg").showModal();
+  }
+  const PW_RULES = { len: p => p.length >= 8, up: p => /\p{Lu}/u.test(p), low: p => /\p{Ll}/u.test(p), num: p => /\d/.test(p), sym: p => /[^\p{L}\p{N}\s]/u.test(p) };
+  const PW_TXT = { len: "al menos 8 caracteres", up: "una mayúscula", low: "una minúscula", num: "un número", sym: "un símbolo" };
+  const updCpRules = () => document.querySelectorAll("#cpRules li").forEach(li => { const ok = PW_RULES[li.dataset.r]($("#cpNew").value); li.classList.toggle("ok", ok); li.dataset.s = ok ? "✓" : "✗"; });
+  async function changePw() {
+    const cur = $("#cpCur"), cur2 = $("#cpCur2"), n1 = $("#cpNew"), n2 = $("#cpNew2");
+    if (!cur.value) return fieldErr(cur, "Escribe tu contraseña actual.");
+    if (cur2.value !== cur.value) return fieldErr(cur2, "Las contraseñas actuales no coinciden.");
+    const miss = Object.keys(PW_RULES).filter(k => !PW_RULES[k](n1.value));
+    if (miss.length) return fieldErr(n1, "La contraseña debe tener " + miss.map(k => PW_TXT[k]).join(", ") + ".");
+    if (n1.value === cur.value) return fieldErr(n1, "La nueva contraseña debe ser distinta de la actual.");
+    if (n1.value !== n2.value) return fieldErr(n2, "Las contraseñas no coinciden.");
+    const btn = $("#cpSave"); btn.disabled = true;
+    try {
+      await D.changePassword(cur.value, n1.value);
+      [cur, cur2, n1, n2].forEach(x => (x.value = "")); updCpRules(); $("#pAccount").open = false; say("Contraseña actualizada ✓");
+    } catch (er) {
+      const m = String(er.message || er);
+      if (m === "current") fieldErr(cur, "La contraseña actual no es correcta.");
+      else fieldErr(n1, /same|different/i.test(m) ? "La nueva contraseña debe ser distinta de la actual." : /failed to fetch|network/i.test(m) ? "No hay conexión con el servidor. Inténtalo de nuevo." : "No se pudo cambiar: " + m);
+    }
+    btn.disabled = false;
   }
   async function submitProfile(e) {
     e.preventDefault(); const f = e.target, err = $("#pErr"); err.hidden = true;
@@ -229,7 +332,7 @@
     }
     btn.disabled = false;
   }
-  const ROLE_TXT = { admin: "Administrador", editor: "Editor", viewer: "Solo lectura" };
+  const ROLE_TXT = { admin: "Administrador", editor: "Editor", viewer: "Solo lectura", pending: "Pendiente de autorización" };
   // Directorio de perfiles (solo editores con Supabase)
   let profCache = { at: 0, rows: [] };
   async function renderProfiles() {
@@ -247,20 +350,48 @@
   }
 
   // ---------- Permisos (solo administrador) ----------
-  const permErr = er => { const m = String(er.message || er); return /duplicate key|already exists/i.test(m) ? "Ese correo ya tiene acceso." : /row-level|permission denied|Solo un administrador|sin permiso/i.test(m) ? "No tienes permiso de administrador para hacer esto." : /check constraint|profiles_role_check/i.test(m) ? "Falta ejecutar supabase-admin.sql en Supabase." : /failed to fetch|network/i.test(m) ? "No hay conexión con el servidor." : "Error: " + m; };
+  const permErr = er => { const m = String(er.message || er); return /duplicate key|already exists/i.test(m) ? "Ese correo ya tiene acceso." : /row-level|permission denied|Solo un administrador|sin permiso/i.test(m) ? "No tienes permiso de administrador para hacer esto." : /check constraint|profiles_role_check/i.test(m) ? "Falta ejecutar supabase-admin.sql y supabase-acceso.sql en Supabase." : /could not find the function|admin_unlock/i.test(m) ? "Falta ejecutar supabase-acceso.sql en Supabase." : /failed to fetch|network/i.test(m) ? "No hay conexión con el servidor." : "Error: " + m; };
+  function permBadge(rows) {
+    const k = rows.filter(r => r.role === "pending").length + rows.filter(r => r.locked && r.role !== "admin").length;
+    $("#tabPerm").innerHTML = "Permisos" + (k ? ` <span class="cnt" title="Solicitudes pendientes o cuentas bloqueadas">${k}</span>` : "");
+    return k;
+  }
+  // ---------- Copias de seguridad (solo administrador) ----------
+  const BK_KIND = { auto: "Automática", manual: "Manual", inicial: "Inicial", "pre-restauracion": "Antes de restaurar" };
+  async function renderBackups() {
+    const card = $("#backupCard"); card.hidden = !D.isAdmin(); if (card.hidden) return;
+    const tbl = $("#backupTbl");
+    try {
+      const rows = await D.listBackups();
+      tbl.innerHTML = "<thead><tr><th>Fecha</th><th>Tipo</th><th>Requerimientos</th><th>Clientes</th><th>Tamaño</th><th></th></tr></thead><tbody>" +
+        (rows.length ? rows.map(r => `<tr><td>${new Date(r.taken_at).toLocaleString("es", { dateStyle: "short", timeStyle: "short" })}</td><td>${esc(BK_KIND[r.kind] || r.kind)}</td><td>${r.nreqs}</td><td>${r.nclients}</td><td>${r.kb} KB</td><td><button type="button" class="ghost" data-bk="${r.id}">Restaurar</button></td></tr>`).join("") : '<tr><td colspan="6" class="muted">Aún no hay copias.</td></tr>') + "</tbody>";
+      tbl.querySelectorAll("[data-bk]").forEach(b => (b.onclick = async () => {
+        const r = rows.find(x => String(x.id) === b.dataset.bk);
+        if (!confirm(`¿Restaurar la copia del ${new Date(r.taken_at).toLocaleString("es")} (${r.nreqs} requerimientos)?\n\nLos datos actuales se reemplazan; antes se guarda una copia de ellos.`)) return;
+        try { await D.restoreBackup(+b.dataset.bk); say("Copia restaurada ✓ Recargando…"); setTimeout(() => location.reload(), 900); } catch (er) { say(permErr(er), 1); }
+      }));
+    } catch (er) { tbl.innerHTML = `<tbody><tr><td class="muted">${/does not exist|could not find|qa_backup/i.test(String(er.message)) ? "Falta ejecutar supabase-seguridad.sql en Supabase." : "No se pudieron cargar las copias: " + esc(er.message)}</td></tr></tbody>`; }
+  }
+  $("#btnBackupNow").onclick = async () => { try { const id = await D.makeBackup(); say(id ? "Copia creada ✓" : "No hay nada nuevo que copiar."); renderBackups(); } catch (er) { say(permErr(er), 1); } };
   async function renderPerms() {
     if (!D.isAdmin()) { $("#v-perm").hidden = true; return; }
+    renderBackups();
     const tbl = $("#permTbl");
     try {
       const rows = await D.listProfiles(), me = D.myEmail();
-      tbl.innerHTML = "<thead><tr><th>Correo</th><th>Nombre</th><th>Permiso</th><th></th></tr></thead><tbody>" + rows.map(r => {
-        const self = r.email === me, nm = [r.nombres, r.apellido_paterno, r.apellido_materno].filter(Boolean).join(" ");
-        return `<tr><td>${esc(r.email)}${self ? ' <span class="badge">tú</span>' : ""}</td><td>${esc(nm) || '<span class="muted">Sin completar</span>'}</td>
-          <td><select data-pe="${esc(r.email)}"${self ? " disabled title=\"No puedes cambiar tu propio permiso\"" : ""}>${Object.entries(ROLE_TXT).map(([k, v]) => `<option value="${k}"${k === r.role ? " selected" : ""}>${v}</option>`).join("")}</select></td>
-          <td>${self ? "" : `<button class="danger" data-pd="${esc(r.email)}">Quitar acceso</button>`}</td></tr>`;
+      const isLocked = r => r.locked && (r.role !== "admin" || Date.now() - new Date(r.locked_at || 0).getTime() < 15 * 60e3);
+      rows.sort((x, y) => (y.role === "pending") - (x.role === "pending") || isLocked(y) - isLocked(x) || (x.email < y.email ? -1 : 1));
+      permBadge(rows);
+      tbl.innerHTML = "<thead><tr><th>Correo</th><th>Nombre</th><th>Estado</th><th>Permiso</th><th></th></tr></thead><tbody>" + rows.map(r => {
+        const self = r.email === me, nm = [r.nombres, r.apellido_paterno, r.apellido_materno].filter(Boolean).join(" "), pend = r.role === "pending", lk = isLocked(r);
+        const st = pend ? '<span class="badge warnb">Pendiente de autorización</span>' : lk ? `<span class="badge dangerb">Bloqueada (${r.fails || 5} intentos)</span>` : '<span class="badge okb">Activa</span>';
+        return `<tr${pend || lk ? ' class="rowflag"' : ""}><td>${esc(r.email)}${self ? ' <span class="badge">tú</span>' : ""}</td><td>${esc(nm) || '<span class="muted">Sin completar</span>'}</td><td>${st}</td>
+          <td><select data-pe="${esc(r.email)}"${self ? " disabled title=\"No puedes cambiar tu propio permiso\"" : ""}>${Object.entries(ROLE_TXT).filter(([k]) => k !== "pending" || pend).map(([k, v]) => `<option value="${k}"${k === r.role ? " selected" : ""}${k === "pending" ? " disabled" : ""}>${pend && k !== "pending" ? "Autorizar como " + v.toLowerCase() : v}</option>`).join("")}</select></td>
+          <td>${lk ? `<button data-pu="${esc(r.email)}" class="primary">Desbloquear</button> ` : ""}${self ? "" : `<button class="danger" data-pd="${esc(r.email)}">${pend ? "Rechazar" : "Quitar acceso"}</button>`}</td></tr>`;
       }).join("") + "</tbody>";
+      tbl.querySelectorAll("[data-pu]").forEach(b => (b.onclick = async () => { try { await D.unlock(b.dataset.pu); say("Cuenta desbloqueada ✓"); profCache.at = 0; renderPerms(); } catch (er) { say(permErr(er), 1); } }));
       tbl.querySelectorAll("[data-pe]").forEach(s => (s.onchange = async () => {
-        try { await D.setRole(s.dataset.pe, s.value); say("Permiso actualizado ✓"); profCache.at = 0; } catch (er) { say(permErr(er), 1); renderPerms(); }
+        try { await D.setRole(s.dataset.pe, s.value); say("Permiso actualizado ✓"); profCache.at = 0; renderPerms(); } catch (er) { say(permErr(er), 1); renderPerms(); }
       }));
       tbl.querySelectorAll("[data-pd]").forEach(b => (b.onclick = async () => {
         if (!confirm(`¿Quitar el acceso a ${b.dataset.pd}? Ya no podrá ver el dashboard.`)) return;
@@ -269,8 +400,10 @@
     } catch (er) { tbl.innerHTML = `<tbody><tr><td class="muted">${esc(permErr(er))}</td></tr></tbody>`; }
   }
   $("#permForm").onsubmit = async e => {
-    e.preventDefault(); const f = e.target, email = f.email.value.trim().toLowerCase();
-    try { await D.addUser(email, f.role.value); f.reset(); say("Acceso otorgado ✓"); profCache.at = 0; renderPerms(); } catch (er) { say(permErr(er), 1); }
+    e.preventDefault(); const f = e.target, email = f.email.value.trim().toLowerCase(); fieldErr(f.email, "");
+    if (!email) return fieldErr(f.email, "Escribe el correo de la persona.");
+    if (!EMAIL_RE.test(email)) return fieldErr(f.email, "El correo no tiene un formato válido (ejemplo: nombre@ips.gob.cl).");
+    try { await D.addUser(email, f.role.value); f.reset(); say("Acceso otorgado ✓"); profCache.at = 0; renderPerms(); } catch (er) { fieldErr(f.email, permErr(er)); }
   };
 
   function applyMode() {
@@ -278,24 +411,47 @@
     refreshUserMenu();
     $("#mode").value = readOnly ? "read" : "edit";
     document.body.classList.toggle("ro", readOnly);
-    $("#btnNew").hidden = readOnly; $("#btnImport").hidden = readOnly; $("#btnImportXls").hidden = readOnly;
+    $("#btnNew").hidden = readOnly; $("#btnImportXls").hidden = readOnly;
+    ["clients", "avisos", "tpl"].forEach(v => { $('#tabs [data-v="' + v + '"]').hidden = readOnly; });   // los lectores no ven Clientes, Avisos ni Plantillas
+    const cur = document.querySelector("#tabs button.on"); if (readOnly && cur && cur.hidden) setView("dash");
     $("#actionbar").classList.toggle("ro", readOnly);
     document.querySelectorAll("[data-edit]").forEach(e => (e.hidden = readOnly));
   }
 
   // ---------- Dashboard ----------
+  // ---------- Prioridad / depósito (vienen de Planner, pero se pueden editar) ----------
+  const PRIOS = ["Urgente", "Importante", "Media", "Baja"];
+  const prioPill = r => (r.priority ? `<span class="prio p-${esc(r.priority)}">${esc(r.priority)}</span>` : "—");
+  function fillBucketFilter() {
+    const el = $("#fBucket"), keep = el.value, set = [...new Set(scoped().map(r => r.bucket).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+    el.innerHTML = `<option value="">Todas las etapas</option>` + set.map(b => `<option>${esc(b)}</option>`).join("");
+    el.value = set.includes(keep) ? keep : "";
+  }
+  function fillBuckets() {
+    const set = [...new Set(store.reqs.filter(r => r.clientId === draft.clientId && r.bucket).map(r => r.bucket))].sort();
+    $("#bucketList").innerHTML = set.map(b => `<option value="${esc(b)}">`).join("");
+  }
+  function renderSrc() {
+    const b = $("#srcBox"), s = draft.src;
+    if (!s?.planner) { b.hidden = true; return; }
+    b.hidden = false;
+    b.innerHTML = `<b>Origen: Microsoft Planner</b> · sincronizado ${s.syncedAt ? new Date(s.syncedAt).toLocaleString("es") : "—"}` + ([...(s.labels || []), ...(s.checks || [])].length ? ` · Etiquetas: ${[...(s.labels || []), ...(s.checks || [])].map(l => `<span class="badge">${esc(l)}</span>`).join(" ")}` : "") +
+      ` · <a href="https://tasks.office.com/Home/Task/${encodeURIComponent(s.taskId)}" target="_blank" rel="noopener">Abrir en Planner</a><br><small class="muted">Planner manda en estado, prioridad, depósito y fechas solo cuando cambian allá; lo que edites aquí se conserva hasta entonces.</small>`;
+  }
   function visible() {
     const t = $("#fType").value, ro = $("#fRole").value, a = $("#fAssignee").value, s = $("#fStatus").value, q = $("#fText").value.toLowerCase();
-    return scoped().filter(r => (!t || r.type === t) && (!a || ids(r).includes(a)) && (!ro || rolesOf(r).includes(ro)) && (!s || r.status === s) &&
+    return scoped().filter(r => (!t || r.type === t) && (!a || ids(r).includes(a)) && (!ro || rolesOf(r).includes(ro)) && (!s || r.status === s) && (!$("#fPrio").value || r.priority === $("#fPrio").value) && (!$("#fBucket").value || r.bucket === $("#fBucket").value) &&
       (!q || (r.code + " " + r.title + " " + r.comments.map(c => c.text).join(" ")).toLowerCase().includes(q)));
   }
+  let alertsOpen = false;                             // las alertas arrancan cerradas; solo se abren si el usuario las abre
   function renderDash() {
     const all = scoped(), c = f => all.filter(f).length;
     const al = alertsList(), st = staleList(), total = al.length + st.length;
-    $("#alerts").innerHTML = total ? `<details open><summary><b>${total} alerta${total > 1 ? "s" : ""}</b> · ${al.length} de atraso · ${st.length} sin actualizar</summary>` +
+    $("#alerts").innerHTML = total ? `<details${alertsOpen ? " open" : ""}><summary><b>${total} alerta${total > 1 ? "s" : ""}</b> · ${al.length} de atraso · ${st.length} sin actualizar</summary>` +
       al.map(x => `<div class="al al${lvl(x.d)}" data-id="${x.r.id}"><b>${lvlTxt(x.d)} de atraso</b> · ${esc(x.r.code)} ${esc(x.r.title)} · <span>${esc(x.what)}</span> · ${esc(mnames(x.r))}</div>`).join("") +
       st.map(r => `<div class="al alS" data-id="${r.id}"><b>Sin actualizar hace ${staleDays(r)} días hábiles</b> · ${esc(r.code)} ${esc(r.title)} · <span>Último avance: ${ldate(r.lastUpdate)}</span> · ${esc(mnames(r))}</div>`).join("") + "</details>" : "";
     $("#alerts").querySelectorAll(".al").forEach(x => (x.onclick = () => openReq(x.dataset.id)));
+    { const dt = $("#alerts").querySelector("details"); if (dt) dt.ontoggle = () => { alertsOpen = dt.open; }; }
     $("#kpis").innerHTML = [["Requerimientos", all.length], ["QA Express", c(r => r.type === "express")], ["QA Tradicional", c(r => r.type === "trad")],
       ["En curso", c(r => r.status === "En curso")], ["Bloqueados", c(r => r.status === "Bloqueado")], ["Atrasados", c(late)], ["Sin actualizar", st.length], ["Entregables vencidos", all.reduce((n, r) => n + delOverdue(r).length, 0)], ["Completados", c(r => r.status === "Completado")]]
       .map(([l, v]) => `<div class="kpi"><b>${v}</b><span>${l}</span></div>`).join("");
@@ -305,16 +461,18 @@
     const kr = $("#fRole").value;
     $("#fRole").innerHTML = `<option value="">Todos los roles</option>` + store.roles.map(r => `<option>${esc(r)}</option>`).join("");
     $("#fRole").value = kr;
+    fillBucketFilter();
     const rows = visible().sort((a, b) => span(a)[1].localeCompare(span(b)[1]));
-    $("#tbl").innerHTML = `<thead><tr>${clientId === "all" ? "<th>Cliente</th>" : ""}<th>Código</th><th>Requerimiento</th><th>Tipo</th><th>Responsable</th><th>Estado</th><th>Avance</th><th>Entregables</th><th>Inicio</th><th>Fin</th><th>Último seguimiento</th></tr></thead><tbody>` +
+    $("#tbl").innerHTML = `<thead><tr>${clientId === "all" ? "<th>Cliente</th>" : ""}<th>Código</th><th>Requerimiento</th><th>Tipo</th><th>Responsables QA</th><th>Estado</th><th>Prioridad</th><th class="wr">Etapa del proyecto</th><th>Avance</th><th>Entregables</th><th>Inicio</th><th>Fin</th><th>Último seguimiento</th></tr></thead><tbody>` +
       (rows.map(r => {
         const p = progress(r), [s, e] = span(r), lc = lastComment(r);
-        return `<tr data-id="${r.id}">${clientId === "all" ? `<td>${esc(clientName(r.clientId))}</td>` : ""}<td><b>${esc(r.code)}</b></td><td>${esc(r.title)}</td>
-          <td><span class="pill ${BASE_TYPES[r.type] ? r.type : "custom"}">${esc(typeName(r.type))}</span></td><td>${esc(mnames(r))}<br><small class="muted">${esc(rolesOf(r).join(", "))}</small></td>
-          <td><span class="dot ${health(r).lvl}" title="${esc(health(r).why.join(" · ") || "En plazo")}"></span> <span class="st st-${r.status.replace(" ", "")}">${r.status}</span>${late(r) ? ` <span class="st al${lvl(daysLate(span(r)[1]))}">Atrasado ${lvlTxt(daysLate(span(r)[1]))}</span>` : ""}</td>
-          <td><div class="pbar"><i style="width:${p}%"></i><span>${p}%</span></div></td><td>${r.deliverables.length ? `${delDone(r)}/${r.deliverables.length}${delOverdue(r).length ? ` <span class="st al3">${delOverdue(r).length} vencido(s)</span>` : ""}` : "—"}</td><td>${s}</td><td>${e}${slip(r) ? ` <span class="st al1" title="Comprometida: ${r.committedEnd}">+${slip(r)} d</span>` : ""}</td>
+        return `<tr data-id="${r.id}">${clientId === "all" ? `<td>${esc(clientName(r.clientId))}</td>` : ""}<td class="nw"><b>${esc(r.code)}</b></td><td class="rq">${esc(r.title)}</td>
+          <td><span class="pill ${BASE_TYPES[r.type] ? r.type : "custom"}">${esc(typeName(r.type))}</span></td><td class="rs">${esc(mnames(r))}<br><small class="muted">${esc(rolesOf(r).join(", "))}</small>${lnames(r) ? `<br><small>Líder: ${esc(lnames(r))}</small>` : ""}</td>
+          <td><div class="stk"><span><span class="dot ${health(r).lvl}" title="${esc(health(r).why.join(" · ") || "En plazo")}"></span> <span class="st st-${r.status.replace(" ", "")}">${r.status}</span></span>${late(r) ? `<span class="st al${lvl(daysLate(span(r)[1]))}">Atrasado ${lvlTxt(daysLate(span(r)[1]))}</span>` : ""}</div></td>
+          <td class="nw">${prioPill(r)}</td><td>${r.bucket ? esc(r.bucket) : "—"}</td>
+          <td><div class="pbar"><i style="width:${p}%"></i><span>${p}%</span></div></td><td class="nw">${r.deliverables.length ? `${delDone(r)}/${r.deliverables.length}${delOverdue(r).length ? ` <span class="st al3">${delOverdue(r).length} vencido(s)</span>` : ""}` : "—"}</td><td class="nw">${s}</td><td class="nw">${e}${slip(r) ? ` <span class="st al1" title="Comprometida: ${r.committedEnd}">+${slip(r)} d</span>` : ""}</td>
           <td class="lc">${lc ? `<small>${lc.at.slice(0, 10)} · ${esc(lc.by)}</small><br>${esc(lc.text.slice(0, 90))}` : '<small class="muted">Sin comentarios</small>'} <small class="muted">(${r.comments.length})</small></td></tr>`;
-      }).join("") || `<tr><td colspan="11" class="muted" style="padding:20px">Sin requerimientos. Usa "+ Requerimiento".</td></tr>`) + `</tbody>`;
+      }).join("") || `<tr><td colspan="13" class="muted" style="padding:20px">Sin requerimientos. Usa "+ Requerimiento".</td></tr>`) + `</tbody>`;
     const hs = [...$("#tbl").querySelectorAll("thead th")].map(t => t.textContent);   // etiquetas para la vista de tarjetas en móvil
     $("#tbl").querySelectorAll("tbody tr[data-id]").forEach(tr => { [...tr.children].forEach((td, i) => (td.dataset.l = hs[i] || "")); tr.onclick = () => openReq(tr.dataset.id); });
   }
@@ -389,6 +547,7 @@
       const rowEl = btn.closest(".hrow"), rid = rowEl.dataset.r, aid = rowEl.dataset.a;
       const pct = +rowEl.querySelector(".hp").value, blocked = rowEl.querySelector(".hbk").checked, text = rowEl.querySelector(".hc").value.trim();
       if (blocked && !text && !store.reqs.find(x => x.id === rid)?.acts.find(x => x.id === aid)?.blockReason) return say("Indica el motivo del bloqueo en el comentario.", 1);
+      const wasBlocked0 = !!store.reqs.find(x => x.id === rid)?.acts.find(x => x.id === aid)?.blocked;
       const by = authorName(), at = new Date().toISOString(), cid = uid();
       commit(s => {
         const r = s.reqs.find(x => x.id === rid), x = r?.acts.find(y => y.id === aid); if (!x) return;
@@ -400,6 +559,7 @@
         statusSync(r, at);
       });
       say("Registrado ✓"); render();
+      if (blocked && !wasBlocked0 && PL) { const rq = store.reqs.find(x => x.id === rid), ac = rq?.acts.find(x => x.id === aid); if (rq && ac) PL.onBlock(rq, ac, text || ac.blockReason); }
     }));
   }
 
@@ -474,10 +634,27 @@
   }
 
   // ---------- Equipo ----------
+  let editMember = null;                               // integrante cuyo nombre se está editando
   function renderTeam() {
-    $("#memberTbl").innerHTML = `<thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Requerimientos activos</th><th></th></tr></thead><tbody>` +
-      store.members.map(m => `<tr><td>${esc(m.name)}</td><td>${esc(m.email)}</td><td>${pick(`data-mrole="${m.id}"`, m.roles, readOnly)}</td><td>${store.reqs.filter(r => ids(r).includes(m.id) && r.status !== "Completado").length}</td>
-        <td>${readOnly ? "" : `<button data-rm="${m.id}" class="danger">Quitar</button>`}</td></tr>`).join("") + `</tbody>`;
+    $("#memberTbl").innerHTML = `<thead><tr><th>Nombre</th><th>Correo de Teams (para avisos)</th><th>Rol</th><th>Requerimientos activos</th><th></th></tr></thead><tbody>` +
+      store.members.map(m => `<tr><td>${editMember === m.id ? `<input data-mname="${m.id}" value="${esc(m.name)}" maxlength="80" aria-label="Nombre">` : esc(m.name)}</td><td>${readOnly ? esc(m.email) || '<span class="muted">Sin correo</span>' : `<input type="email" data-memail="${m.id}" value="${esc(m.email || "")}" placeholder="nombre@ips.gob.cl" aria-label="Correo de Teams de ${esc(m.name)}">`}</td><td>${pick(`data-mrole="${m.id}"`, m.roles, readOnly)}</td><td>${store.reqs.filter(r => ids(r).includes(m.id) && r.status !== "Completado").length}</td>
+        <td>${readOnly ? "" : editMember === m.id ? `<button data-msave="${m.id}" class="primary">Guardar</button> <button data-mcancel class="ghost">Cancelar</button>` : `<button data-medit="${m.id}" class="ghost">Editar</button> <button data-rm="${m.id}" class="danger">Quitar</button>`}</td></tr>`).join("") + `</tbody>`;
+    const mt = $("#memberTbl");
+    mt.querySelectorAll("[data-medit]").forEach(b => (b.onclick = () => { editMember = b.dataset.medit; renderTeam(); mt.querySelector("[data-mname]")?.focus(); }));
+    mt.querySelectorAll("[data-mcancel]").forEach(b => (b.onclick = () => { editMember = null; renderTeam(); }));
+    const saveName = id => {
+      const i = mt.querySelector(`[data-mname="${id}"]`), v = i.value.trim(), m = store.members.find(x => x.id === id);
+      if (!v) return fieldErr(i, "El nombre no puede quedar vacío.");
+      if (store.members.some(x => x.id !== id && norm(x.name) === norm(v))) return fieldErr(i, "Ya existe un integrante con ese nombre.");
+      m.name = v; editMember = null; save(); render(); say("Nombre actualizado ✓");
+    };
+    mt.querySelectorAll("[data-msave]").forEach(b => (b.onclick = () => saveName(b.dataset.msave)));
+    mt.querySelectorAll("[data-mname]").forEach(i => (i.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); saveName(i.dataset.mname); } else if (e.key === "Escape") { editMember = null; renderTeam(); } }));
+    $("#memberTbl").querySelectorAll("[data-memail]").forEach(i => (i.onchange = () => {
+      const v = i.value.trim(), m = store.members.find(x => x.id === i.dataset.memail);
+      if (v && !EMAIL_RE.test(v)) return fieldErr(i, "El correo no tiene un formato válido (ejemplo: nombre@ips.gob.cl).");
+      fieldErr(i, ""); m.email = v; save(); say(v ? "Correo guardado ✓" : "Correo quitado: esta persona no recibirá avisos personales.");
+    }));
     $("#memberTbl").querySelectorAll("[data-mrole]").forEach(cb => (cb.onchange = () => { const id = cb.dataset.mrole; store.members.find(m => m.id === id).roles = [...$("#memberTbl").querySelectorAll(`[data-mrole="${id}"]:checked`)].map(x => x.value); save(); render(); const d = document.querySelector(`[data-mrole="${id}"]`)?.closest("details"); if (d) d.open = true; }));
     { const keep = [...document.querySelectorAll("#memberRole input:checked")].map(x => x.value); $("#memberRole").innerHTML = pick('data-newrole', keep, readOnly).replace("Sin rol", "Roles…"); }
     $("#roleTbl").innerHTML = `<thead><tr><th>Rol</th><th>Integrantes</th><th></th></tr></thead><tbody>` + store.roles.map((r, i) =>
@@ -497,6 +674,54 @@
     }));
   }
 
+  // ---------- Responsables de requerimiento (líderes) ----------
+  let editLeader = null;                               // responsable cuyo nombre se está editando
+  function renderLeaders() {
+    const t = $("#leaderTbl"), cnt = l => store.reqs.filter(r => leaderIds(r).includes(l.id) && r.status !== "Completado").length;
+    t.innerHTML = `<thead><tr><th>Nombre</th><th>Correo</th><th>Roles</th><th>Requerimientos activos</th><th></th></tr></thead><tbody>` +
+      (store.leaders.map(l => `<tr><td>${editLeader === l.id ? `<input data-lname="${l.id}" value="${esc(l.name)}" maxlength="80" aria-label="Nombre">` : `<b>${esc(l.name)}</b>`}</td>
+        <td>${readOnly ? (esc(l.email) || '<span class="muted">Sin correo</span>') : `<input type="email" data-lemail="${l.id}" value="${esc(l.email || "")}" placeholder="nombre@ips.gob.cl" aria-label="Correo de ${esc(l.name)}">`}</td>
+        <td>${lpick(`data-lrole="${l.id}"`, l.roles, readOnly)}</td><td>${cnt(l)}</td>
+        <td>${readOnly ? "" : editLeader === l.id ? `<button data-lsave="${l.id}" class="primary">Guardar</button> <button data-lcancel class="ghost">Cancelar</button>` : `<button data-ledit="${l.id}" class="ghost">Editar</button> <button data-lrm="${l.id}" class="danger">Quitar</button>`}</td></tr>`).join("")
+        || `<tr><td colspan="5" class="muted" style="padding:16px">Aún no hay responsables de requerimiento. Agrégalos con el formulario de arriba.</td></tr>`) + `</tbody>`;
+    t.querySelectorAll("[data-ledit]").forEach(b => (b.onclick = () => { editLeader = b.dataset.ledit; renderLeaders(); t.querySelector("[data-lname]")?.focus(); }));
+    t.querySelectorAll("[data-lcancel]").forEach(b => (b.onclick = () => { editLeader = null; renderLeaders(); }));
+    const saveName = id => {
+      const i = t.querySelector(`[data-lname="${id}"]`), v = i.value.trim(), l = store.leaders.find(x => x.id === id);
+      if (!v) return fieldErr(i, "El nombre no puede quedar vacío.");
+      if (store.leaders.some(x => x.id !== id && norm(x.name) === norm(v))) return fieldErr(i, "Ya existe un responsable con ese nombre.");
+      l.name = v; editLeader = null; save(); render(); say("Nombre actualizado ✓");
+    };
+    t.querySelectorAll("[data-lsave]").forEach(b => (b.onclick = () => saveName(b.dataset.lsave)));
+    t.querySelectorAll("[data-lname]").forEach(i => (i.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); saveName(i.dataset.lname); } else if (e.key === "Escape") { editLeader = null; renderLeaders(); } }));
+    t.querySelectorAll("[data-lemail]").forEach(i => (i.onchange = () => {
+      const v = i.value.trim(), l = store.leaders.find(x => x.id === i.dataset.lemail);
+      if (v && !EMAIL_RE.test(v)) return fieldErr(i, "El correo no tiene un formato válido (ejemplo: nombre@ips.gob.cl).");
+      fieldErr(i, ""); l.email = v; save(); say(v ? "Correo guardado ✓" : "Correo quitado.");
+    }));
+    t.querySelectorAll("[data-lrole]").forEach(cb => (cb.onchange = () => { const id = cb.dataset.lrole; store.leaders.find(l => l.id === id).roles = [...t.querySelectorAll(`[data-lrole="${id}"]:checked`)].map(x => x.value); save(); render(); const d = document.querySelector(`[data-lrole="${id}"]`)?.closest("details"); if (d) d.open = true; }));
+    t.querySelectorAll("[data-lrm]").forEach(b => (b.onclick = () => {
+      const l = store.leaders.find(x => x.id === b.dataset.lrm), n = cnt(l);
+      if (!confirm(`¿Quitar a ${l.name}?${n ? ` Está asignado a ${n} requerimiento(s) activo(s); quedarán sin ese responsable.` : ""}`)) return;
+      store.leaders = store.leaders.filter(x => x !== l); store.reqs.forEach(r => { r.leaderIds = (r.leaderIds || []).filter(i => i !== l.id); });
+      save(); render();
+    }));
+    { const keep = [...document.querySelectorAll("#leaderRole input:checked")].map(x => x.value); $("#leaderRole").innerHTML = lpick("data-newlrole", keep, readOnly).replace("Sin rol", "Roles…"); }
+    $("#leaderRoleTbl").innerHTML = `<thead><tr><th>Rol</th><th>Responsables</th><th></th></tr></thead><tbody>` + (store.leaderRoles.map((r, i) =>
+      `<tr><td><b>${esc(r)}</b></td><td>${store.leaders.filter(l => l.roles.includes(r)).map(l => `<span class="chip">${esc(l.name)}</span>`).join(" ") || '<span class="muted">—</span>'}</td><td>${readOnly ? "" : `<button data-lrr="${i}" class="danger">Eliminar</button>`}</td></tr>`).join("") || `<tr><td colspan="3" class="muted" style="padding:16px">Aún no hay roles. Crea el primero arriba.</td></tr>`) + `</tbody>`;
+    $("#leaderRoleTbl").querySelectorAll("[data-lrr]").forEach(b => (b.onclick = () => {
+      const r = store.leaderRoles[+b.dataset.lrr];
+      if (!confirm(`¿Eliminar el rol "${r}"? Quienes lo tengan quedarán sin ese rol.`)) return;
+      store.leaderRoles.splice(+b.dataset.lrr, 1); store.leaders.forEach(l => { l.roles = l.roles.filter(x => x !== r); }); save(); render();
+    }));
+  }
+  function renderLeaderPick() {
+    const box = $("#leaderPick"), open = box.querySelector("details")?.open;
+    box.innerHTML = idPick(store.leaders, "data-rl", leaderIds(draft), readOnly, "Agrega responsables en la solapa «Responsables de requerimiento»");
+    if (open) box.querySelector("details").open = true;
+    box.querySelectorAll("[data-rl]").forEach(cb => (cb.onchange = () => { draft.leaderIds = [...box.querySelectorAll("[data-rl]:checked")].map(x => x.value); renderLeaderPick(); }));
+  }
+
   // ---------- Plantilla ----------
   function autosize(root) {                 // las cajas de texto crecen según lo escrito
     root.querySelectorAll("textarea.grow").forEach(t => {
@@ -504,11 +729,16 @@
       t.oninput = fit; fit();
     });
   }
+  // Duración de una actividad de plantilla: en días o en HH (horas hombre; 8 HH = 1 día)
+  const HH_DAY = 8;
+  const tplDays = t => (t.unit === "hh" ? Math.max(1, Math.ceil((+t.days || 1) / HH_DAY)) : Math.max(1, +t.days || 1));
   function tplTable(tbl, t) {
-    tbl.innerHTML = `<thead><tr><th>#</th><th>Actividad</th><th>Duración (días)</th><th></th></tr></thead><tbody>` +
-      t.map((x, i) => `<tr><td>${i + 1}</td><td><textarea class="grow" rows="1" data-i="${i}" data-f="name">${esc(x.name)}</textarea></td><td><input type="number" min="1" data-i="${i}" data-f="days" value="${x.days}"></td>
+    tbl.innerHTML = `<thead><tr><th>#</th><th>Actividad</th><th>Duración <select data-allunit aria-label="Poner todas las actividades en la misma unidad"><option value="">Unidad de todas…</option><option value="d">Todas en días</option><option value="hh">Todas en HH</option></select></th><th></th></tr></thead><tbody>` +
+      t.map((x, i) => `<tr><td>${i + 1}</td><td><textarea class="grow" rows="1" data-i="${i}" data-f="name">${esc(x.name)}</textarea></td><td><div class="durw"><input type="number" min="1" data-i="${i}" data-f="days" value="${x.days}" aria-label="Duración"><select data-i="${i}" data-f="unit" aria-label="Unidad de la duración"><option value="d"${x.unit !== "hh" ? " selected" : ""}>Días</option><option value="hh"${x.unit === "hh" ? " selected" : ""}>HH</option></select></div>${x.unit === "hh" ? `<small class="muted">≈ ${tplDays(x)} día(s) · ${HH_DAY} HH = 1 día</small>` : ""}</td>
         <td><button data-up="${i}">↑</button> <button data-rm="${i}" class="danger">✕</button></td></tr>`).join("") + `</tbody>`;
-    tbl.querySelectorAll("input,textarea").forEach(i => { i.onchange = () => { t[+i.dataset.i][i.dataset.f] = i.dataset.f === "days" ? Math.max(1, +i.value) : i.value; save(); }; i.disabled = readOnly; });
+    tbl.querySelectorAll("input,textarea,select[data-f]").forEach(i => { i.onchange = () => { t[+i.dataset.i][i.dataset.f] = i.dataset.f === "days" ? Math.max(1, +i.value) : i.value; save(); if (i.dataset.f === "unit" || i.dataset.f === "days") tplTable(tbl, t); }; i.disabled = readOnly; });
+    const all = tbl.querySelector("[data-allunit]"); all.disabled = readOnly;
+    all.onchange = () => { if (!all.value) return; t.forEach(x => { x.unit = all.value; }); save(); tplTable(tbl, t); say(all.value === "hh" ? "Todas las actividades quedaron en HH." : "Todas las actividades quedaron en días."); };
     tbl.querySelectorAll("[data-rm]").forEach(b => (b.onclick = () => { t.splice(+b.dataset.rm, 1); save(); renderTpl(); }));
     tbl.querySelectorAll("[data-up]").forEach(b => (b.onclick = () => { const i = +b.dataset.up; if (i) { [t[i - 1], t[i]] = [t[i], t[i - 1]]; save(); renderTpl(); } }));
     tbl.querySelectorAll("button").forEach(b => (b.hidden = readOnly));
@@ -525,7 +755,7 @@
       <button class="tplCDel danger" data-n="${n}" data-edit>Eliminar tipo</button></div>`).join("");
     (store.customTpl || []).forEach((c, n) => tplTable($("#tplTblC-" + n), c.acts));
     box.querySelectorAll(".tplName").forEach(i => (i.onchange = () => { const v = i.value.trim(); if (!v) { i.value = store.customTpl[+i.dataset.cn].name; return; } store.customTpl[+i.dataset.cn].name = v; save(); render(); }));
-    box.querySelectorAll(".tplCAdd").forEach(b => (b.onclick = () => { store.customTpl[+b.dataset.n].acts.push({ name: "Nueva actividad", days: 1 }); save(); renderTpl(); }));
+    box.querySelectorAll(".tplCAdd").forEach(b => (b.onclick = () => { store.customTpl[+b.dataset.n].acts.push({ name: "Nueva actividad", days: 1, unit: "d" }); save(); renderTpl(); }));
     box.querySelectorAll(".tplCDel").forEach(b => (b.onclick = () => { const c = store.customTpl[+b.dataset.n], n = store.reqs.filter(r => r.type === c.id).length; if (n) return say(`No se puede eliminar "${c.name}": lo usan ${n} requerimiento(s). Cámbiales el tipo primero.`, 1); if (!confirm(`¿Eliminar el tipo "${c.name}"?`)) return; store.customTpl.splice(+b.dataset.n, 1); save(); renderTpl(); }));
     box.querySelectorAll("[data-edit]").forEach(b => (b.hidden = readOnly));
   }
@@ -539,7 +769,7 @@
   // ---------- Requerimiento (ventana) ----------
   function fromTemplate(start) {
     let s = start || today;
-    return tplFor(draft?.type || "trad").map(a => { const x = { id: uid(), name: a.name, start: s, end: addDays(s, a.days - 1), percent: 0, blocked: false }; setIds(x, ids(draft)); s = addDays(x.end, 1); return x; });
+    return tplFor(draft?.type || "trad").map(a => { const x = { id: uid(), name: a.name, start: s, end: addDays(s, tplDays(a) - 1), percent: 0, blocked: false }; setIds(x, ids(draft)); s = addDays(x.end, 1); return x; });
   }
   function renderReqPick() {
     const box = $("#assigneePick"), open = box.querySelector("details")?.open;
@@ -547,10 +777,12 @@
     if (open) box.querySelector("details").open = true;
     box.querySelectorAll("[data-ra]").forEach(cb => (cb.onchange = () => { setIds(draft, [...box.querySelectorAll("[data-ra]:checked")].map(x => x.value)); renderReqPick(); }));
   }
+  let openSnap = "";
+  const dirtyReq = () => { if (readOnly) return false; try { readForm(); } catch {} return JSON.stringify(draft) !== openSnap; };
   function openReq(id) {
-    isNew = !id;
+    isNew = !id; threadAll = false; editCm = null; histCm.clear();
     draft = id ? JSON.parse(JSON.stringify(store.reqs.find(r => r.id === id)))
-      : { id: uid(), clientId: clientId !== "all" ? clientId : (store.clients[0]?.id || ""), code: "", title: "", type: "trad", assigneeId: store.members[0]?.id || "", assigneeIds: store.members[0] ? [store.members[0].id] : [], status: "Pendiente", percent: 0, start: today, end: today, acts: [], comments: [] };
+      : { id: uid(), clientId: clientId !== "all" ? clientId : (store.clients[0]?.id || ""), code: "", title: "", type: "trad", assigneeId: "", assigneeIds: [], leaderIds: [], status: "Pendiente", percent: 0, start: today, end: today, acts: [], comments: [] };
     if (isNew) draft.acts = fromTemplate(today);
     if (!isNew && draft.type === "express" && !draft.acts.length) {           // requerimiento express antiguo: pasa a las 4 actividades
       draft.acts = fromTemplate(draft.start || today); const done = Math.round((draft.percent || 0) / 100 * draft.acts.length); draft.acts.forEach((x, i) => (x.percent = i < done ? 100 : 0));
@@ -559,16 +791,19 @@
     $("#rTitle").textContent = isNew ? "Nuevo requerimiento" : `${draft.code} · ${draft.title}`;
     f.clientId.innerHTML = store.clients.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
     setIds(draft, ids(draft));
-    renderTypeSel(); renderReqPick();
-    for (const k of ["clientId", "code", "title", "type", "status", "percent", "start", "end"]) f[k].value = draft[k] ?? "";
+    renderTypeSel(); renderReqPick(); renderLeaderPick();
+    for (const k of ["clientId", "code", "title", "type", "status", "percent", "start", "end", "priority", "bucket"]) f[k].value = draft[k] ?? "";
+    fillBuckets(); renderSrc();
     draft.deliverables ||= []; draft.metrics ||= {};
     if (isNew && !draft.deliverables.length) draft.deliverables = (draft.type === "express" ? ["Informe final"] : ["Plan de pruebas", "Evidencias (EVP)", "Informe final"]).map(n => ({ id: uid(), name: n, due: span(draft)[1], state: "pendiente", url: "" }));
+    filterInput(f.code, cleanCode); filterInput(f.title, cleanTitle); filterInput(f.bucket, cleanStage);
     syncType(); renderActs(); renderDel(); renderMetrics(); renderThread(); renderCommit();
     $("#newComment").value = "";
     f.querySelectorAll("input,select,textarea").forEach(e => { if (e.id !== "newComment") e.disabled = readOnly; });
-    $("#newComment").disabled = readOnly; $("#btnComment").hidden = readOnly; $("#rSave").hidden = readOnly; $("#rDelete").hidden = readOnly || isNew;
+    $("#newComment").disabled = readOnly && !D.remote; $("#btnComment").hidden = readOnly && !D.remote; $("#rSave").hidden = readOnly; $("#rDelete").hidden = readOnly || isNew;
     f.querySelectorAll("[data-edit]").forEach(e => { if (e.id !== "rSave" && e.id !== "rDelete") e.hidden = readOnly; });
     $("#dlg").showModal(); autosize($("#actTbl"));
+    try { readForm(); } catch {} openSnap = JSON.stringify(draft);        // foto inicial para detectar cambios sin guardar
   }
   function renderCommit() {
     const b = $("#commitBox"); if (isNew || !draft.committedEnd) { b.hidden = true; return; }
@@ -582,11 +817,12 @@
   }
   function readForm() {
     const f = $("#rform");
-    for (const k of ["clientId", "code", "title", "type", "status", "start", "end"]) draft[k] = f[k].value;
+    for (const k of ["clientId", "code", "title", "type", "status", "start", "end", "priority"]) draft[k] = f[k].value;
+    draft.bucket = f.bucket.value.trim();
     draft.percent = Math.min(100, Math.max(0, +f.percent.value || 0));
   }
   function renderActs() {
-    $("#actTbl").innerHTML = `<thead><tr><th>Actividad <span class="star">*</span></th><th>Resp.</th><th>Inicio <small class="opt">(opcional)</small></th><th>Fin <small class="opt">(opcional)</small></th><th>% Avance</th><th>Bloq.</th><th></th></tr></thead><tbody>` +
+    $("#actTbl").innerHTML = `<thead><tr><th>Actividad <span class="star">*</span></th><th>Resp. QA</th><th>Inicio <small class="opt">(opcional)</small></th><th>Fin <small class="opt">(opcional)</small></th><th>% Avance</th><th>Bloqueado <small class="opt">(opcional)</small></th><th></th></tr></thead><tbody>` +
       draft.acts.map((a, i) => `<tr><td><textarea class="grow" rows="1" required data-i="${i}" data-f="name">${esc(a.name)}</textarea></td><td>${memberPick(`data-ai="${i}"`, ids(a), readOnly)}</td>
         <td><input type="date" data-i="${i}" data-f="start" value="${a.start}"></td><td><input type="date" data-i="${i}" data-f="end" value="${a.end}"></td>
         <td><select data-i="${i}" data-f="percent" title="% de avance de la actividad">${pctOpts(a.percent)}</select></td>
@@ -598,7 +834,7 @@
     });
     $("#actTbl").querySelectorAll("[data-ai]").forEach(cb => (cb.onchange = () => {
       const det = cb.closest("details"), l = [...det.querySelectorAll("[data-ai]:checked")].map(x => x.value);
-      setIds(draft.acts[+cb.dataset.ai], l); det.querySelector("summary").textContent = l.length ? l.map(mname).join(", ") : "Sin asignar";
+      setIds(draft.acts[+cb.dataset.ai], l); det.querySelector("summary").innerHTML = l.length ? chips(l.map(mname)) : "Sin asignar";
     }));
     $("#actTbl").querySelectorAll("[data-rm]").forEach(b => (b.onclick = () => { draft.acts.splice(+b.dataset.rm, 1); renderActs(); }));
   }
@@ -625,16 +861,68 @@
   function calcMet() {
     const m = draft.metrics, ex = pct(+m.executed, +m.designed), pa = pct(+m.passed, +m.executed), au = pct(+m.automated, +m.designed);
     $("#metCalc").textContent = [ex !== null ? `Ejecución: ${ex}%` : "", pa !== null ? `Aprobación: ${pa}%` : "", au !== null ? `Automatizado: ${au}%` : "", openDef(draft) ? `Defectos abiertos: ${openDef(draft)}` : ""].filter(Boolean).join(" · ");
+    const w = [];
+    if (+m.designed > 0 && +m.executed > +m.designed) w.push("ejecutados > diseñados");
+    if (+m.passed + +m.failed > +m.executed) w.push("aprobados + fallidos > ejecutados");
+    if (+m.designed > 0 && +m.automated > +m.designed) w.push("automatizados > diseñados");
+    if (w.length) $("#metCalc").textContent += (ex !== null || pa !== null || au !== null ? "  " : "") + "⚠ Revisa: " + w.join("; ") + ".";
   }
+  const CODE_RE = /^[A-Za-z][0-9]{1,8}$/, TITLE_RE = /^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9 ()#$\/-]+$/, STAGE_RE = /^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ ]+$/;
+  const cleanCode = v => { let out = ""; for (const ch of v.toUpperCase()) { if (!out) { if (/[A-Z]/.test(ch)) out = ch; } else if (/[0-9]/.test(ch) && out.length < 9) out += ch; } return out; };
+  const cleanTitle = v => v.replace(/[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9 ()#$\/-]/g, "").replace(/ {2,}/g, " ");
+  const cleanStage = v => v.replace(/[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ ]/g, "").replace(/ {2,}/g, " ");
+  const filterInput = (el, fn) => { el.oninput = () => { const clean = fn(el.value); if (clean !== el.value) { const pos = Math.max(0, (el.selectionStart ?? clean.length) - (el.value.length - clean.length)); el.value = clean; try { el.setSelectionRange(pos, pos); } catch {} } el.classList.remove("bad"); }; };
+  let threadAll = false;                               // false = solo los 5 comentarios más recientes
+  const THREAD_MAX = 5;
+  // ¿el comentario es mío? Solo el autor puede editarlo (correo de la sesión; en modo local, el nombre con que firma)
+  const myC = c => c.src !== "planner" && (c.byEmail ? c.byEmail.toLowerCase() === (boot.user || "").toLowerCase() : c.by === authorName());
+  let editCm = null; const histCm = new Set();
+  const fdt = s => new Date(s).toLocaleString("es");
   function renderThread() {
-    $("#thread").innerHTML = draft.comments.length ? draft.comments.map(c => `<div class="cm"><small>${new Date(c.at).toLocaleString("es")} · <b>${esc(c.by)}</b></small><p>${esc(c.text)}</p></div>`).join("")
+    const all = [...draft.comments].sort((x, y) => y.at.localeCompare(x.at)), list = threadAll ? all : all.slice(0, THREAD_MAX);   // el más reciente arriba
+    const T = $("#thread");
+    T.innerHTML = all.length ? list.map(c => {
+      const ed = editCm === c.id, hist = c.edits || [], mine = (!readOnly || D.remote) && myC(c);
+      return `<div class="cm${c.src === "planner" ? " plc" : ""}"><small>${fdt(c.at)} · <b>${esc(c.by)}</b>${c.src === "planner" ? ' <span class="badge pl">Planner</span>' : ""}${hist.length ? ` · <i>editado ${fdt(c.editedAt || hist[hist.length - 1].at)}</i>` : ""}</small>` +
+        (ed ? `<textarea class="grow cmEdit" rows="2" maxlength="2000" aria-label="Editar comentario">${esc(c.text)}</textarea><div class="cmAct"><button type="button" class="primary" data-cmsave="${c.id}">Guardar</button><button type="button" class="ghost" data-cmcancel>Cancelar</button></div>` : `<p>${esc(c.text)}</p>`) +
+        (!ed && (mine || hist.length) ? `<div class="cmAct">${mine ? `<button type="button" class="ghost" data-cmedit="${c.id}" title="Editar mi comentario">✎ Editar</button>` : ""}${hist.length ? `<button type="button" class="ghost cmEye${histCm.has(c.id) ? " on" : ""}" data-cmhist="${c.id}" title="Ver historial (${hist.length} versión/es anterior/es)" aria-label="Ver historial del comentario">👁 <small>${hist.length}</small></button>` : ""}</div>` : "") +
+        (histCm.has(c.id) && hist.length ? `<div class="cmHist"><b>Versiones anteriores</b>${[...hist].reverse().map(h => `<div class="cmh"><small>Reemplazado el ${fdt(h.at)}</small><p>${esc(h.text)}</p></div>`).join("")}</div>` : "") + "</div>";
+    }).join("") + (all.length > THREAD_MAX ? `<button type="button" class="ghost" id="thrMore">${threadAll ? "Ver menos" : `Ver más (${all.length - THREAD_MAX} anteriores)`}</button>` : "")
       : `<p class="muted">Aún no hay comentarios.</p>`;
-    $("#thread").scrollTop = 1e6;
+    autosize(T);
+    T.scrollTop = 0;
+    const mb = $("#thrMore"); if (mb) mb.onclick = () => { threadAll = !threadAll; renderThread(); };
+    T.querySelectorAll("[data-cmedit]").forEach(b => (b.onclick = () => { editCm = b.dataset.cmedit; renderThread(); T.querySelector(".cmEdit")?.focus(); }));
+    T.querySelectorAll("[data-cmcancel]").forEach(b => (b.onclick = () => { editCm = null; renderThread(); }));
+    T.querySelectorAll("[data-cmhist]").forEach(b => (b.onclick = () => { const id = b.dataset.cmhist; histCm.has(id) ? histCm.delete(id) : histCm.add(id); renderThread(); }));
+    T.querySelectorAll("[data-cmsave]").forEach(b => (b.onclick = () => {
+      const id = b.dataset.cmsave, ta = T.querySelector(".cmEdit"), v = ta.value.trim(), c = draft.comments.find(x => x.id === id);
+      if (!c || !myC(c)) return say("Solo puedes editar tus propios comentarios.", 1);
+      if (!v) return fieldErr(ta, "El comentario no puede quedar vacío.");
+      if (v === c.text) { editCm = null; return renderThread(); }
+      const now = new Date().toISOString(), by = authorName();
+      const apply = r => { const k = r.comments.find(x => x.id === id); if (!k || !myC(k)) return; (k.edits ||= []).push({ text: k.text, at: now, by }); k.text = v; k.editedAt = now; r.lastUpdate = now; };
+      if (readOnly) {                                  // lector: edita su propio comentario mediante una función del servidor
+        const rid = draft.id; if (isNew) return;
+        D.qaCommentEdit(rid, id, by, v).then(() => { apply(draft); const r0 = store.reqs.find(x => x.id === rid); if (r0) apply(r0); editCm = null; renderThread(); say("Comentario actualizado ✓"); })
+          .catch(er => say(/function .* does not exist|schema cache/i.test(er.message) ? "Falta ejecutar supabase-comentarios.sql (versión nueva) en Supabase." : "No se pudo editar: " + er.message, 1));
+        return;
+      }
+      apply(draft);
+      if (!isNew) { const rid = draft.id; commit(s => { const r = s.reqs.find(x => x.id === rid); if (r) apply(r); }); render(); }
+      editCm = null; renderThread(); say("Comentario actualizado ✓ (la versión anterior quedó en el historial)");
+    }));
   }
   function addComment() {
     const text = $("#newComment").value.trim(); if (!text) return;
     let by = lsGet("qa-author", ""); if (!by) { by = prompt("¿Con qué nombre quieres firmar tus comentarios?", "") || "Anónimo"; lsSet("qa-author", by); }
-    const cm = { id: uid(), at: new Date().toISOString(), by, text }; draft.comments.push(cm);
+    const cm = { id: uid(), at: new Date().toISOString(), by, byEmail: boot.user || "", text }; draft.comments.push(cm);
+    if (readOnly) {                                    // lector: solo puede comentar, mediante una función del servidor
+      if (isNew) return;
+      D.qaComment(draft.id, cm).then(() => { const r = store.reqs.find(x => x.id === draft.id); if (r && !r.comments.some(k => k.id === cm.id)) { r.comments.push(cm); r.lastUpdate = cm.at; } render(); say("Comentario agregado ✓"); })
+        .catch(er => { draft.comments = draft.comments.filter(k => k.id !== cm.id); renderThread(); say(/function .* does not exist|schema cache/i.test(er.message) ? "Falta ejecutar supabase-comentarios.sql en Supabase." : "No se pudo comentar: " + er.message, 1); });
+      $("#newComment").value = ""; renderThread(); return;
+    }
     if (!isNew) { const id = draft.id; commit(s => { const r = s.reqs.find(x => x.id === id); if (r && !r.comments.some(k => k.id === cm.id)) { r.comments.push(cm); r.lastUpdate = cm.at; } }); render(); }
     $("#newComment").value = ""; renderThread();
   }
@@ -649,6 +937,10 @@
     form.querySelectorAll(".bad").forEach(el => el.classList.remove("bad"));
     const mark = (el, why) => { if (el) { el.classList.add("bad"); bad.push(why); } };
     for (const [k, n] of [["clientId", "Cliente"], ["code", "Código"], ["title", "Título"]]) if (!String(draft[k] || "").trim()) mark(form[k], `${n} es obligatorio`);
+    const was = store.reqs.find(r => r.id === draft.id);        // un código o título antiguo con símbolos no obliga a cambiarlos mientras no se editen
+    if (String(draft.code || "").trim() && (isNew || draft.code !== was?.code) && !CODE_RE.test(draft.code)) mark(form.code, "El código debe ser 1 letra seguida de hasta 8 números, sin símbolos (ejemplo: R1903)");
+    if (String(draft.title || "").trim() && (isNew || draft.title !== was?.title) && !TITLE_RE.test(draft.title)) mark(form.title, "El título solo admite letras, números, espacios y estos signos: ( ) # $ / -");
+    if (String(draft.bucket || "").trim() && (isNew || draft.bucket !== was?.bucket) && !STAGE_RE.test(draft.bucket)) mark(form.bucket, "La etapa del proyecto solo admite letras y espacios (sin números, símbolos ni caracteres especiales)");
     const wiUrl = form.querySelector('[data-m="wiUrl"]'); if (wiUrl && !wiUrl.checkValidity()) mark(wiUrl, "El enlace al work item debe comenzar con https://");
     if (!draft.acts.length) { mark($("#btnActAdd"), "Agrega al menos una actividad"); mark($("#actTbl"), ""); }
     // fechas opcionales: si se dejan vacías se completan con la actividad anterior (inicio) o con el inicio (fin)
@@ -661,7 +953,9 @@
     });
     if (bad.length) { form.querySelector(".bad")?.scrollIntoView({ block: "center" }); return say("Revisa los campos marcados en rojo: " + [...new Set(bad.filter(Boolean))].join("; ") + ".", 1); }
     [draft.start, draft.end] = span(draft);
-    { const p = progress(draft); draft.percent = p; if (p >= 100) draft.status = "Completado"; else if (p > 0 && draft.status === "Pendiente") draft.status = "En curso"; }
+    const prev = store.reqs.find(r => r.id === draft.id), manual = !!prev && prev.status !== draft.status;   // si elegiste el estado a mano, se respeta
+    { const p = progress(draft), anyB = draft.acts.some(a => a.blocked); draft.percent = p;
+      if (!manual) { if (p >= 100) draft.status = "Completado"; else if (anyB) draft.status = "Bloqueado"; else if (draft.status === "Bloqueado") draft.status = p > 0 ? "En curso" : "Pendiente"; else if (p > 0 && draft.status === "Pendiente") draft.status = "En curso"; } }
     if (draft.status === "Completado" && !draft.completedAt) draft.completedAt = today;
     if (draft.status !== "Completado") draft.completedAt = "";
     const old = store.reqs.find(r => r.id === draft.id);
@@ -684,26 +978,36 @@
     sel.value = clientId;
   }
   function renderClients() {
-    $("#clientTbl").innerHTML = `<thead><tr><th>Cliente</th><th>Requerimientos</th><th></th></tr></thead><tbody>` + store.clients.map(c => `<tr><td><input data-cn="${c.id}" value="${esc(c.name)}"${readOnly ? " disabled" : ""}></td><td>${store.reqs.filter(r => r.clientId === c.id).length}</td><td>${readOnly ? "" : `<button data-cdel="${c.id}" class="danger">Eliminar</button>`}</td></tr>`).join("") + "</tbody>";
-    $("#clientTbl").querySelectorAll("[data-cn]").forEach(i => (i.onchange = () => { const v = i.value.trim(); if (!v) { i.value = clientName(i.dataset.cn); return; } store.clients.find(c => c.id === i.dataset.cn).name = v; save(); renderClientSel(); }));
-    $("#clientTbl").querySelectorAll("[data-cdel]").forEach(b => (b.onclick = () => {
+    const box = $("#clientTbl");
+    box.innerHTML = store.clients.map(c => (PL ? PL.cardHtml(c, readOnly) : `<div class="ccard"><div class="chead"><input data-cn="${c.id}" value="${esc(c.name)}"${readOnly ? " disabled" : ""}><span class="muted">${store.reqs.filter(r => r.clientId === c.id).length} requerimiento(s)</span>${readOnly ? "" : `<button data-cdel="${c.id}" class="danger">Eliminar cliente</button>`}</div></div>`)).join("");
+    if (PL) PL.bind(box);
+    box.querySelectorAll("[data-cn]").forEach(i => (i.onchange = () => { const v = i.value.trim(); if (!v) { i.value = clientName(i.dataset.cn); return; } commit(s => { const c = s.clients.find(x => x.id === i.dataset.cn); if (c) c.name = v; }); renderClientSel(); }));
+    box.querySelectorAll("[data-cdel]").forEach(b => (b.onclick = () => {
       const c = store.clients.find(x => x.id === b.dataset.cdel);
       if (store.reqs.some(r => r.clientId === c.id)) return say(`No se puede eliminar "${c.name}": tiene requerimientos. Elimínalos o muévelos a otro cliente primero.`, 1);
       if (!confirm(`¿Eliminar el cliente "${c.name}"?`)) return;
       store.clients = store.clients.filter(x => x !== c); save(); render();
     }));
   }
+  function renderAvisos() {
+    const box = $("#avisosBox");
+    if (!PL) { box.innerHTML = '<div class="card"><p class="muted">Módulo de avisos no disponible.</p></div>'; return; }
+    box.innerHTML = PL.avisosHtml(readOnly); PL.avisosBind(box, readOnly);
+  }
   function render() {
     renderTypeFilter();
+    if (PL) $("#btnSync").hidden = !PL.anyEnabled();
     if (!$("#v-dash").hidden) renderDash();
     if (!$("#v-hoy").hidden) renderHoy();
     if (!$("#v-resumen").hidden) renderResumen();
     if (!$("#v-gantt").hidden) renderGantt();
     if (!$("#v-team").hidden) renderTeam();
+    if (!$("#v-leaders").hidden) renderLeaders();
     renderClientSel();
     if (!$("#v-team").hidden) renderProfiles();
     if (!$("#v-perm").hidden) renderPerms();
     if (!$("#v-clients").hidden) renderClients();
+    if (!$("#v-avisos").hidden) renderAvisos();
     if (!$("#v-tpl").hidden) renderTpl();
   }
   // ---------- Importar Excel / CSV ----------
@@ -716,9 +1020,10 @@
     if (v instanceof Date && !isNaN(v)) { const d = new Date(v.getTime() + 60000); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }   // SheetJS: los componentes locales son los de la celda
     if (typeof v === "number") return iso(new Date(Math.round((v - 25569) * 86400000)));            // serial de Excel
     const s = String(v).trim(); let m;
-    if ((m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/))) return `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
-    if ((m = s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})/))) return `${m[3].length === 2 ? "20" + m[3] : m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
-    return "";
+    const real = x => { const d = new Date(x + "T00:00:00Z"); return !isNaN(d) && d.toISOString().slice(0, 10) === x ? x : null; };
+    if ((m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/))) return real(`${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`);
+    if ((m = s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})/))) return real(`${m[3].length === 2 ? "20" + m[3] : m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`);
+    return null;
   }
   const loadScript = src => new Promise((ok, no) => { if (window.XLSX) return ok(); const s = document.createElement("script"); s.src = src; s.onload = ok; s.onerror = () => no(new Error("No se pudo cargar el lector de Excel (¿sin internet?)")); document.head.append(s); });
   let imRows = [];
@@ -741,8 +1046,9 @@
       it.type = /expr/i.test(String(g("type"))) ? "express" : "trad";
       const an = String(g("assignee") || "").trim(), mem = an ? store.members.find(m => norm(m.name) === norm(an) || norm(m.name).includes(norm(an)) || norm(an).includes(norm(m.name))) : null;
       it.assigneeId = mem?.id || ""; it.assigneeName = mem?.name || an; if (an && !mem) it.notes.push("responsable no encontrado");
-      it.start = toIsoDate(g("start")) || today; it.end = toIsoDate(g("end"));
-      if (it.end && it.end < it.start) it.err = "Fin anterior al inicio";
+      const sIso = toIsoDate(g("start")), eIso = toIsoDate(g("end"));
+      it.start = sIso || today; it.end = eIso || "";
+      if (sIso === null) it.err = "Fecha de inicio inválida"; else if (eIso === null) it.err = "Fecha de fin inválida"; else if (it.end && it.end < it.start) it.err = "Fin anterior al inicio";
       const st = norm(g("status")); it.status = /complet|termin|cerrad/.test(st) ? "Completado" : /bloq/.test(st) ? "Bloqueado" : /curso|proceso|ejecu/.test(st) ? "En curso" : "";
       const pc = parseFloat(String(g("percent")).replace(",", ".").replace("%", "")); it.percent = isNaN(pc) ? null : Math.max(0, Math.min(100, pc <= 1 && String(g("percent")).indexOf("%") < 0 && pc > 0 && pc < 1 ? pc * 100 : pc));
       const key = ((it.clientId || it.clientNew) + "|" + it.code).toLowerCase();
@@ -765,7 +1071,7 @@
     const newClients = {}, by = authorName(), at = new Date().toISOString(), reqs = [];
     for (const r of imRows.filter(x => x.ok)) {
       let cid = r.clientId; if (!cid) { newClients[r.clientNew] ||= { id: uid(), name: r.clientNew }; cid = newClients[r.clientNew].id; }
-      const tpl = tplFor(r.type), base = tpl.map(t => t.days), tot = base.reduce((x, y) => x + y, 0);
+      const tpl = tplFor(r.type), base = tpl.map(tplDays), tot = base.reduce((x, y) => x + y, 0);
       const T = r.end ? Math.max(1, d2n(r.end) - d2n(r.start) + 1) : tot, ds = scaleActs(base, T);
       let s = r.start; const acts = tpl.map((t, i) => { const e = addDays(s, ds[i] - 1), x = { id: uid(), name: t.name, start: s, end: e, percent: 0, assigneeId: r.assigneeId, blocked: false, blockReason: "", blockedSince: "" }; s = addDays(e, 1); return x; });
       const p = r.status === "Completado" ? 100 : (r.percent ?? 0), done = Math.round(p / 100 * acts.length); acts.forEach((x, i) => (x.percent = i < done ? 100 : 0));
@@ -793,9 +1099,49 @@
     } catch (er) { m.textContent = er.message || "No se pudo leer el archivo."; m.hidden = false; }
   }
 
+  // ---------- Selector de requerimientos (informe Word y exportar Gantt) ----------
+  const reqStLbl = r => (late(r) && r.status !== "Bloqueado" && r.status !== "Completado" ? "Atrasado" : r.status);
+  // Abre el diálogo para elegir uno o varios requerimientos entre los que se ven en el dashboard. Devuelve la lista elegida, o null si cancela.
+  function pickReqs({ title, ok, hint }) {
+    return new Promise(res => {
+      const list = visible().sort((x, y) => clientName(x.clientId).localeCompare(clientName(y.clientId)) || x.code.localeCompare(y.code));
+      if (!list.length) { say("No hay requerimientos para elegir (revisa los filtros).", 1); return res(null); }
+      const dlg = $("#pickdlg"), q = $("#pickQ"), sel = new Set(list.map(r => r.id));
+      $("#pickTitle").textContent = title; $("#pickOk").textContent = ok; $("#pickHint").textContent = hint || ""; q.value = "";
+      const shown = () => { const t = q.value.trim().toLowerCase(); return list.filter(r => !t || (r.code + " " + r.title + " " + clientName(r.clientId)).toLowerCase().includes(t)); };
+      const upd = () => { $("#pickCnt").textContent = `${sel.size} de ${list.length} seleccionados`; $("#pickOk").disabled = !sel.size; };
+      const draw = () => {
+        const box = $("#pickList");
+        box.innerHTML = shown().map(r => `<label class="pickrow"><input type="checkbox" data-pk="${esc(r.id)}"${sel.has(r.id) ? " checked" : ""}><span class="pk-main"><b>${esc(r.code)}</b> ${esc(r.title)}</span><span class="pk-meta">${clientId === "all" ? esc(clientName(r.clientId)) + " · " : ""}${esc(reqStLbl(r))} · ${progress(r)}%</span></label>`).join("") || '<p class="muted" style="padding:10px">Ningún requerimiento coincide con la búsqueda.</p>';
+        box.querySelectorAll("[data-pk]").forEach(cb => (cb.onchange = () => { cb.checked ? sel.add(cb.dataset.pk) : sel.delete(cb.dataset.pk); upd(); }));
+        upd();
+      };
+      q.oninput = draw;
+      $("#pickAll").onclick = () => { shown().forEach(r => sel.add(r.id)); draw(); };
+      $("#pickNone").onclick = () => { shown().forEach(r => sel.delete(r.id)); draw(); };
+      const done = v => { dlg.close(); res(v); };
+      $("#pickOk").onclick = () => done(list.filter(r => sel.has(r.id)));
+      $("#pickCancel").onclick = $("#pickClose").onclick = () => done(null);
+      dlg.oncancel = e => { e.preventDefault(); done(null); };
+      draw(); dlg.showModal(); q.focus();
+    });
+  }
+  const download = (blob, name) => { const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); };
+  // Informe Word con el resumen de actividades de los requerimientos elegidos (report.js)
+  async function exportReport() {
+    const list = await pickReqs({ title: "Descargar resumen de actividades (Word)", ok: "Descargar Word", hint: "Elige uno o varios requerimientos. El documento incluye resumen ejecutivo, y por cada requerimiento sus actividades con responsable, fechas, duración, avance y estado, más entregables, métricas y comentarios." });
+    if (!list) return;
+    const btn = $("#btnReport"); btn.disabled = true; say("Generando el documento…");
+    try {
+      const blob = await window.QA_REPORT.build(list, { today, d2n, clientName, typeName, mnames, lnames, span, progress, daysLate, lvlTxt, delOverdue, author: authorName(), scope: clientId === "all" ? "Todos los clientes" : clientName(clientId) });
+      download(blob, `resumen-actividades-qa-${today}.docx`); say(`Resumen descargado ✓ (${list.length} requerimiento${list.length === 1 ? "" : "s"})`);
+    } catch (er) { say(er.message || "No se pudo generar el documento.", 1); }
+    finally { btn.disabled = false; }
+  }
+
   // ---------- Exportar carta Gantt ----------
-  function ganttHtml(forPrint) {
-    const list = visible().sort((x, y) => clientName(x.clientId).localeCompare(clientName(y.clientId)) || x.code.localeCompare(y.code));
+  function ganttHtml(forPrint, pick) {
+    const list = (pick || visible()).slice().sort((x, y) => clientName(x.clientId).localeCompare(clientName(y.clientId)) || x.code.localeCompare(y.code));
     if (!list.length) return null;
     const all = list.flatMap(r => span(r)).concat(today).map(d2n);
     let min = Math.min(...all) - 1, max = Math.max(...all) + 3;
@@ -823,7 +1169,7 @@
       <tr><td colspan="${9 + cols.length}" style="border:0;color:#555">Generada el ${today} · Vista ${weekly ? "semanal" : "diaria"} · Avance: tono fuerte = completado, tono claro = pendiente · Línea roja = hoy</td></tr>
       <tr>${["Cliente", "Requerimiento", "Actividad", "Responsable", "Inicio", "Fin", "Avance", "Estado", "Tipo"].map(x => `<td rowspan="2" style="${th}">${x}</td>`).join("")}${months.map(m => `<td colspan="${m.n}" style="${th}">${esc(m.k)}</td>`).join("")}</tr>
       <tr>${cols.map(n => { const d = new Date(n * DAY); return `<td style="${th}font-size:${weekly ? 7 : 8}pt">${weekly ? d.getUTCDate() + "/" + (d.getUTCMonth() + 1) : d.getUTCDate()}</td>`; }).join("")}</tr>`;
-    const row = (cl, req, act, who, s, e, pct, st, tipo, bold) => `<tr style="${bold ? "font-weight:bold;background:#eef2fb;" : ""}"><td>${esc(cl)}</td><td>${esc(req)}</td><td>${esc(act)}</td><td>${esc(who)}</td><td>${s}</td><td>${e}</td><td style="text-align:center">${pct}%</td><td style="color:${COL[st]};font-weight:bold">${st}</td><td>${tipo}</td>${cols.map(n => cell(n, d2n(s), d2n(e), pct, COL[st])).join("")}</tr>`;
+    const row = (cl, req, act, who, s, e, pct, st, tipo, bold) => `<tr style="${bold ? "font-weight:bold;background:#eef2fb;" : ""}"><td>${esc(cl)}</td><td>${esc(req)}</td><td>${esc(act)}</td><td>${esc(who)}</td><td>${esc(s)}</td><td>${esc(e)}</td><td style="text-align:center">${esc(pct)}%</td><td style="color:${COL[st]};font-weight:bold">${esc(st)}</td><td>${esc(tipo)}</td>${cols.map(n => cell(n, d2n(s), d2n(e), pct, COL[st])).join("")}</tr>`;
     for (const r of list) {
       const [s, e] = span(r), p = progress(r), rs = reqSt(r), cn = clientName(r.clientId), nm = `${r.code} · ${r.title}`;
       t += row(cn, nm, r.acts.length ? "(resumen)" : "—", mnames(r), s, e, p, rs, typeName(r.type), true);
@@ -831,33 +1177,37 @@
     }
     return t + "</table>";
   }
-  function exportGanttXls() {
-    const t = ganttHtml(false); if (!t) return say("No hay requerimientos para exportar.", 1);
+  async function exportGanttXls() {
+    const list = await pickReqs({ title: "Exportar Gantt (Excel)", ok: "Exportar Excel", hint: "Elige los requerimientos que quieres incluir en la carta Gantt." }); if (!list) return;
+    const t = ganttHtml(false, list); if (!t) return say("No hay requerimientos para exportar.", 1);
     const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8"><!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>Carta Gantt</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]--></head><body>${t}</body></html>`;
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob(["\ufeff" + html], { type: "application/vnd.ms-excel" }));
     a.download = `carta-gantt-qa-${today}.xls`; a.click(); say("Gantt exportado ✓");
   }
-  function exportGanttPdf() {
-    const t = ganttHtml(true); if (!t) return say("No hay requerimientos para exportar.", 1);
-    const w = window.open("", "_blank"); if (!w) return say("El navegador bloqueó la ventana. Permite ventanas emergentes para este sitio.", 1);
-    w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Carta Gantt QA ${today}</title><style>@page{size:A3 landscape;margin:10mm}body{margin:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}table td{padding:2px 4px;white-space:nowrap}</style></head><body>${t}<script>onload=()=>setTimeout(()=>print(),300)<\/script></body></html>`);
+  async function exportGanttPdf() {
+    const w = window.open("", "_blank"); if (!w) return say("El navegador bloqueó la ventana. Permite ventanas emergentes para este sitio.", 1);   // se abre antes del selector para que no la bloquee
+    w.document.write("<p style=\"font:14px sans-serif;padding:20px\">Preparando la carta Gantt…</p>");
+    const list = await pickReqs({ title: "Exportar Gantt (PDF)", ok: "Exportar PDF", hint: "Elige los requerimientos que quieres incluir en la carta Gantt." }); if (!list) { w.close(); return; }
+    const t = ganttHtml(true, list); if (!t) { w.close(); return say("No hay requerimientos para exportar.", 1); }
+    w.document.open(); w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Carta Gantt QA ${today}</title><style>@page{size:A3 landscape;margin:10mm}body{margin:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}table td{padding:2px 4px;white-space:nowrap}</style></head><body>${t}<script>onload=()=>setTimeout(()=>print(),300)<\/script></body></html>`);
     w.document.close();
   }
 
+  const csvSafe = c => { const s = String(c ?? ""); return /^[=+\-@\t\r]/.test(s) ? "'" + s : s; };   // evita que Excel ejecute fórmulas escritas en un título o comentario
   function csv() {
-    const rows = [["Cliente", "Código", "Título", "Tipo", "Responsable", "Estado", "Avance %", "Inicio", "Fin", "Comentarios"]].concat(visible().map(r => {
-      const [s, e] = span(r); return [clientName(r.clientId), r.code, r.title, typeName(r.type), mnames(r), r.status, progress(r), s, e, r.comments.map(c => `${c.at.slice(0, 10)} ${c.by}: ${c.text}`).join(" | ")];
+    const rows = [["Cliente", "Código", "Título", "Tipo", "Responsable", "Estado", "Prioridad", "Etapa del proyecto", "Avance %", "Inicio", "Fin", "Comentarios"]].concat(visible().map(r => {
+      const [s, e] = span(r); return [clientName(r.clientId), r.code, r.title, typeName(r.type), mnames(r), r.status, r.priority || "", r.bucket || "", progress(r), s, e, r.comments.map(c => `${c.at.slice(0, 10)} ${c.by}: ${c.text}`).join(" | ")];
     }));
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob(["﻿" + rows.map(r => r.map(c => `"${String(c ?? "").replace(/"/g, '""')}"`).join(",")).join("\r\n")], { type: "text/csv" }));
+    a.href = URL.createObjectURL(new Blob(["﻿" + rows.map(r => r.map(c => `"${csvSafe(c).replace(/"/g, '""')}"`).join(",")).join("\r\n")], { type: "text/csv" }));
     a.download = `seguimiento-qa-${today}.csv`; a.click();
   }
 
   document.querySelectorAll("#tabs button").forEach(b => (b.onclick = () => setView(b.dataset.v)));
   $("#mode").onchange = e => { readOnly = e.target.value === "read"; lsSet("qa-mode", e.target.value); applyMode(); render(); };
   $("#btnNew").onclick = () => openReq(null);
-  $("#btnExport").onclick = () => D.exportJson(store);
+  $("#btnReport").onclick = exportReport;
   $("#btnCsv").onclick = csv;
   $("#btnImportXls").onclick = openImport; $("#imFile").onchange = onImportFile;
   $("#imClose").onclick = $("#imCancel").onclick = () => $("#imdlg").close();
@@ -871,24 +1221,34 @@
   $("#hoyMine").onchange = renderHoy;
   $("#btnGanttXls").onclick = exportGanttXls;
   $("#btnGanttPdf").onclick = exportGanttPdf;
-  $("#btnImport").onclick = () => $("#fileImport").click();
-  $("#fileImport").onchange = async e => {
-    try { const s = JSON.parse(await e.target.files[0].text()); if (!s.reqs || !s.members) throw 0; if (!confirm("Esto reemplaza todos los datos actuales. ¿Continuar?")) return; store = s; save(); render(); say("Importado ✓"); }
-    catch { say("Archivo inválido.", 1); } e.target.value = "";
-  };
   ["fType", "fRole", "fAssignee", "fStatus"].forEach(i => ($("#" + i).onchange = render)); $("#fText").oninput = render;
   document.querySelectorAll("#zoom button").forEach(b => (b.onclick = () => { pxDay = +b.dataset.z; lsSet("qa-zoom", pxDay); renderGantt(); }));
-  $("#memberForm").onsubmit = e => { e.preventDefault(); if (readOnly) return; const f = e.target; store.members.push({ id: uid(), name: f.name.value.trim(), email: f.email.value.trim(), roles: [...document.querySelectorAll("#memberRole input:checked")].map(x => x.value) }); f.reset(); save(); render(); };
+  $("#memberForm").onsubmit = e => { e.preventDefault(); if (readOnly) return; const f = e.target; fieldErr(f.name, ""); fieldErr(f.email, "");
+    if (!f.name.value.trim()) return fieldErr(f.name, "Escribe el nombre de la persona.");
+    if (f.email.value.trim() && !EMAIL_RE.test(f.email.value.trim())) return fieldErr(f.email, "El correo no tiene un formato válido (ejemplo: nombre@ips.gob.cl).");
+    if (store.members.some(m => norm(m.name) === norm(f.name.value))) return fieldErr(f.name, "Ya existe un integrante con ese nombre.");
+    if (f.email.value.trim() && store.members.some(m => (m.email || "").toLowerCase() === f.email.value.trim().toLowerCase())) return fieldErr(f.email, "Ese correo ya pertenece a otro integrante.");
+    store.members.push({ id: uid(), name: f.name.value.trim(), email: f.email.value.trim(), roles: [...document.querySelectorAll("#memberRole input:checked")].map(x => x.value) }); f.reset(); save(); render(); };
   // el menú se posiciona sobre la ventana (fixed) para que ninguna columna lo recorte ni lo solape
   const placeMenu = d => { const m = d.querySelector(".rpmenu"), r = d.querySelector("summary").getBoundingClientRect(), h = Math.min(m.scrollHeight, 320), below = innerHeight - r.bottom - 12, up = below < h && r.top > below;
     Object.assign(m.style, { position: "fixed", left: r.left + "px", minWidth: r.width + "px", maxHeight: Math.max(120, Math.min(320, up ? r.top - 12 : below)) + "px", overflowY: "auto", top: up ? "" : r.bottom + 4 + "px", bottom: up ? innerHeight - r.top + 4 + "px" : "" }); };
   document.addEventListener("toggle", e => { if (e.target.matches?.(".rolepick[open]")) placeMenu(e.target); }, true);
   document.addEventListener("scroll", e => { if (!e.target.closest?.(".rpmenu")) document.querySelectorAll(".rolepick[open]").forEach(d => (d.open = false)); }, true);
   document.addEventListener("click", e => document.querySelectorAll(".rolepick[open]").forEach(d => { if (!d.contains(e.target)) d.open = false; }));
+  $("#leaderForm").onsubmit = e => { e.preventDefault(); if (readOnly) return; const f = e.target; fieldErr(f.name, ""); fieldErr(f.email, "");
+    const name = f.name.value.trim(), email = f.email.value.trim();
+    if (!name) return fieldErr(f.name, "Escribe el nombre de la persona.");
+    if (email && !EMAIL_RE.test(email)) return fieldErr(f.email, "El correo no tiene un formato válido (ejemplo: nombre@ips.gob.cl).");
+    if (store.leaders.some(l => norm(l.name) === norm(name))) return fieldErr(f.name, "Ya existe un responsable con ese nombre.");
+    if (email && store.leaders.some(l => l.email && l.email.toLowerCase() === email.toLowerCase())) return fieldErr(f.email, "Ese correo ya está registrado en otro responsable.");
+    store.leaders.push({ id: uid(), name, email, roles: [...document.querySelectorAll("#leaderRole input:checked")].map(x => x.value) });
+    f.reset(); document.querySelectorAll("#leaderRole input").forEach(x => (x.checked = false)); save(); render(); say("Responsable agregado ✓");
+  };
+  $("#leaderRoleForm").onsubmit = e => { e.preventDefault(); if (readOnly) return; const v = e.target.role.value.trim(); if (!v) return fieldErr(e.target.role, "Escribe el nombre del rol."); fieldErr(e.target.role, ""); if (store.leaderRoles.some(r => norm(r) === norm(v))) return fieldErr(e.target.role, "Ese rol ya existe."); store.leaderRoles.push(v); e.target.reset(); save(); render(); say("Rol creado ✓"); };
   $("#roleForm").onsubmit = e => { e.preventDefault(); if (readOnly) return; const v = e.target.role.value.trim(); if (store.roles.includes(v)) return say("Ese rol ya existe.", 1); store.roles.push(v); e.target.reset(); save(); render(); };
   $("#clientSel").onchange = e => { clientId = e.target.value; lsSet("qa-client", clientId); render(); };
   $("#clientForm").onsubmit = e => { e.preventDefault(); if (readOnly) return; const v = e.target.name.value.trim(); if (!v) return; if (store.clients.some(c => c.name.toLowerCase() === v.toLowerCase())) return say("Ese cliente ya existe.", 1); const c = { id: uid(), name: v }; store.clients.push(c); e.target.reset(); save(); clientId = c.id; lsSet("qa-client", clientId); render(); say("Cliente creado y seleccionado ✓"); };
-  document.querySelectorAll(".tplAdd").forEach(b => (b.onclick = () => { store.templates[b.dataset.k].push({ name: "Nueva actividad", days: 1 }); save(); renderTpl(); }));
+  document.querySelectorAll(".tplAdd").forEach(b => (b.onclick = () => { store.templates[b.dataset.k].push({ name: "Nueva actividad", days: 1, unit: "d" }); save(); renderTpl(); }));
   document.querySelectorAll(".tplReset").forEach(b => (b.onclick = () => { if (confirm("¿Restaurar esta plantilla por defecto?")) { store.templates[b.dataset.k] = D.defaultTemplates()[b.dataset.k]; save(); renderTpl(); } }));
   $("#rform").type.onchange = () => {
     const prev = draft.type; readForm(); syncType();
@@ -905,25 +1265,38 @@
     if (readOnly) return;
     const name = (prompt("Nombre del nuevo tipo de requerimiento (ej: QA Performance, Regresión):", "") || "").trim(); if (!name) return;
     if ((store.customTpl ||= []).some(c => c.name.toLowerCase() === name.toLowerCase())) return say("Ya existe un tipo con ese nombre.", 1);
-    store.customTpl.push({ id: uid(), name, acts: [{ name: "Nueva actividad", days: 1 }] }); save(); renderTpl(); render(); say("Tipo creado ✓ (ya está disponible en el campo Tipo)");
+    store.customTpl.push({ id: uid(), name, acts: [{ name: "Nueva actividad", days: 1, unit: "d" }] }); save(); renderTpl(); render(); say("Tipo creado ✓ (ya está disponible en el campo Tipo)");
   };
   $("#btnComment").onclick = addComment;
   $("#rform").onsubmit = submitReq;
   // campos inválidos (p. ej. Código/Título vacío, enlace mal escrito) bloquean el envío sin avisar si quedan fuera de vista
   ["input", "change"].forEach(t => $("#rform").addEventListener(t, ev => ev.target.classList?.remove("bad")));
   $("#rform").addEventListener("invalid", ev => { ev.target.classList.add("bad"); const l =ev.target.closest("label"); say(`Campo inválido: ${(l ? l.childNodes[0].textContent : ev.target.name || "").trim().replace(/\s*\*$/, "")} — ${ev.target.validationMessage}`, 1); }, true);
-  $("#rCancel").onclick = $("#rClose").onclick = () => $("#dlg").close();
+  $("#rCancel").onclick = $("#rClose").onclick = () => { if (dirtyReq() && !confirm("Tienes cambios sin guardar. ¿Descartarlos?")) return; $("#dlg").close(); };
+  $("#dlg").addEventListener("cancel", e => { if (dirtyReq() && !confirm("Tienes cambios sin guardar. ¿Descartarlos?")) e.preventDefault(); });   // tecla Escape
   $("#rDelete").onclick = () => { if (confirm("¿Eliminar este requerimiento y su seguimiento?")) { store.reqs = store.reqs.filter(r => r.id !== draft.id); save(); $("#dlg").close(); render(); } };
 
   $("#btnLogout").onclick = D.logout;
-  const paintTheme = () => { const t = document.documentElement.dataset.theme; document.querySelectorAll("#themes button").forEach(b => { b.classList.toggle("on", b.dataset.t === t); b.setAttribute("aria-pressed", b.dataset.t === t); }); };
-  document.querySelectorAll("#themes button").forEach(b => (b.onclick = () => { document.documentElement.dataset.theme = b.dataset.t; lsSet("qa-theme", b.dataset.t); paintTheme(); }));
+  const paintTheme = () => {
+    const t = document.documentElement.dataset.theme;
+    document.querySelectorAll("#themes .tmenu button").forEach(b => { const on = b.dataset.t === t; b.classList.toggle("on", on); b.setAttribute("aria-pressed", on); if (on) { $("#tnameCur").textContent = b.dataset.n; $("#tswCur").style.background = b.dataset.bg; } });
+  };
+  document.querySelectorAll("#themes .tmenu button").forEach(b => (b.onclick = () => { document.documentElement.dataset.theme = b.dataset.t; lsSet("qa-theme", b.dataset.t); paintTheme(); $("#themes").open = false; }));
+  document.addEventListener("click", e => { const d = $("#themes"); if (d.open && !d.contains(e.target)) d.open = false; });
   paintTheme();
   D.onError = m => say(m, 1);
   D.onRemoteChange = s => { store = s; if (!$("#dlg").open) render(); };
   $("#pform").onsubmit = submitProfile;
+  $("#cpSave").onclick = changePw; $("#cpNew").addEventListener("input", updCpRules);
+  $("#pAccount").querySelectorAll(".eye").forEach(b => (b.onclick = () => { const i = b.previousElementSibling; i.type = i.type === "password" ? "text" : "password"; b.classList.toggle("on", i.type === "text"); }));
   $("#pClose").onclick = $("#pCancel").onclick = () => $("#pdlg").close();
+  // ---------- Planner / Teams (módulo planner.js) ----------
+  PL = window.QA_PLANNER_UI ? window.QA_PLANNER_UI({
+    store: () => store, clientId: () => clientId, uid, addDays, today, d2n, norm, scaleActs, tplFor, setIds, commit, say, render, esc, authorName, span, progress, late, daysLate, lvlTxt, delOverdue, staleDays, userEmail: () => boot.user || "", fieldErr
+  }) : null;
+  $("#btnSync").onclick = () => PL && PL.syncActive();
   initUserMenu();
   applyMode(); render();
+  if (D.isAdmin()) D.listProfiles().then(rows => { const k = permBadge(rows); if (k) say(`Tienes ${k} solicitud(es) de acceso o cuenta(s) bloqueada(s) en Permisos.`); }).catch(() => {});
   if (D.remote && !D.getProfile().nombres) setTimeout(() => openProfile(true), 400);
 })();
