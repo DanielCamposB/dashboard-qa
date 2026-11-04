@@ -1,7 +1,7 @@
 // Iconos «!» amarillos con una breve explicación de cada columna, campo y sección, en todas las solapas.
 // Se agregan solos cada vez que la pantalla se redibuja (no hace falta tocar cada tabla).
 (function () {
-  const norm = s => s.replace(/\p{Extended_Pictographic}/gu, "").replace(/\*/g, "").replace(/\(opcional\)/gi, "").replace(/\s+/g, " ").trim().toLowerCase();
+  const norm = s => s.replace(/⁠/g, "").replace(/\p{Extended_Pictographic}/gu, "").replace(/\*/g, "").replace(/\(opcional\)/gi, "").replace(/\s+/g, " ").trim().toLowerCase();
   const own = el => norm([...el.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join(" "));
   const T = {
     dash: {
@@ -108,11 +108,11 @@
       if (el.tagName === "LABEL" || el.classList.contains("lbl")) {                      // en los formularios el ícono va junto al nombre del campo, no debajo
         if (el.querySelector(":scope > .lcap")) return;
         const cap = document.createElement("span"); cap.className = "lcap";
-        const first = el.firstChild; if (!first || first.nodeType !== 3) { el.append(" ", mk(tip)); return; }
+        const first = el.firstChild; if (!first || first.nodeType !== 3) { el.append("\u2060", mk(tip)); return; }
         el.insertBefore(cap, first); cap.append(first);
         if (cap.nextSibling && cap.nextSibling.classList && cap.nextSibling.classList.contains("star")) cap.append(" ", cap.nextSibling);
-        cap.append(" ", mk(tip));
-      } else el.append(" ", mk(tip));
+        cap.append("\u2060", mk(tip));
+      } else el.append("\u2060", mk(tip));
     });
   }
   let t = null;

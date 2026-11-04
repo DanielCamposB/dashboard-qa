@@ -113,7 +113,7 @@
     const setMode = (m, keep) => {
       mode = m; showErr(""); showOk(""); stopTick();
       if (!keep) { f.reset(); resetEmail = ""; }
-      f.querySelectorAll(".pw input").forEach(i => (i.type = "password")); f.querySelectorAll(".eye").forEach(b => b.classList.remove("on"));
+      f.querySelectorAll(".pw input").forEach(i => (i.type = "password")); f.querySelectorAll(".eye").forEach(b => { b.classList.remove("on"); b.setAttribute("aria-pressed", "false"); b.setAttribute("aria-label", "Mostrar contraseña"); });
       const t = T[m];
       $("#loginTitle").textContent = t[0]; info.textContent = m === "code" ? `Enviamos un código de verificación a ${maskMail(resetEmail)}. Revisa tu bandeja de entrada (y spam); vence en pocos minutos.` : t[1]; $("#loginBtn").textContent = t[2];
       f.email.parentElement.hidden = !(m === "login" || m === "signup" || m === "reset");
@@ -124,7 +124,7 @@
       if (m === "code") { $("#lnkResend").classList.add("off"); f.code.focus(); }
     };
     f.password.addEventListener("input", updRules);
-    document.querySelectorAll("#loginForm .eye").forEach(b => (b.onclick = () => { const i = b.previousElementSibling, show = i.type === "password"; i.type = show ? "text" : "password"; b.classList.toggle("on", show); }));
+    document.querySelectorAll("#loginForm .eye").forEach(b => (b.onclick = () => { const i = b.previousElementSibling, show = i.type === "password"; i.type = show ? "text" : "password"; b.classList.toggle("on", show); b.setAttribute("aria-pressed", String(show)); b.setAttribute("aria-label", show ? "Ocultar contraseña" : "Mostrar contraseña"); }));
     $("#lnkSignup").onclick = e => { e.preventDefault(); setMode("signup"); };
     $("#lnkReset").onclick = e => { e.preventDefault(); setMode("reset"); };
     $("#lnkBack").onclick = async e => { e.preventDefault(); if (mode === "newpw" || mode === "code") await D.signOutQuiet(); setMode("login"); };
@@ -276,7 +276,7 @@
   function setView(v) {
     if (v === "dash" && $("#v-dash").hidden) alertsOpen = false;     // al volver al Dashboard, las alertas vuelven a estar cerradas
     document.querySelectorAll(".view").forEach(e => (e.hidden = e.id !== "v-" + v));
-    document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.v === v));
+    document.querySelectorAll("#tabs button").forEach(b => { const on = b.dataset.v === v; b.classList.toggle("on", on); if (on) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current"); });
     document.querySelector("#tabs button.on")?.scrollIntoView({ inline: "center", block: "nearest" });   // en móvil la pestaña activa queda a la vista
     render();
   }
@@ -555,7 +555,7 @@
       </div>`;
     };
     const stale = staleList().filter(r => !mine || ids(r).includes(me));
-    const grp = (key, cls, n, title, body) => `<div class="card hgroup${hoyClosed.has(key) ? " closed" : ""}" data-g="${esc(key)}"><h3 class="${cls} htog" role="button" tabindex="0" aria-expanded="${!hoyClosed.has(key)}" title="Clic para expandir o minimizar"><span class="hcount">${n}</span> ${title}<span class="hchev">▾</span></h3><div class="hbody">${body}</div></div>`;
+    const grp = (key, cls, n, title, body) => `<div class="card hgroup${hoyClosed.has(key) ? " closed" : ""}" data-g="${esc(key)}"><div class="${cls} htog" role="button" tabindex="0" aria-expanded="${!hoyClosed.has(key)}" title="Clic para expandir o minimizar"><span class="hcount">${n}</span> ${title}<span class="hchev">▾</span></div><div class="hbody">${body}</div></div>`;
     let h = groups.map(([t, cls, list]) => grp(t, cls, list.length, t, list.length ? list.sort((x, y) => x.a.end.localeCompare(y.a.end)).map(row).join("") : '<p class="muted">Nada por aquí 👌</p>')).join("");
     h += grp("stale", "alS", stale.length, `Requerimientos sin actualizar (≥ ${STALE} días hábiles)`, stale.length ? stale.map(r => `<div class="hrow stale" data-open="${r.id}"><div class="hinfo"><b>${esc(r.code)}</b> · ${esc(r.title)} <small class="muted">${esc(clientName(r.clientId))}</small><div class="hact">${esc(mnames(r))} · último avance ${fd(ldate(r.lastUpdate))} (hace ${staleDays(r)} días hábiles)</div></div><div class="hctl"><button class="ghost">Abrir</button></div></div>`).join("") : '<p class="muted">Todo al día 👌</p>');
     $("#hoyBody").innerHTML = h;
@@ -1336,7 +1336,7 @@
   D.onRemoteChange = s => { store = s; if (!$("#dlg").open) render(); };
   $("#pform").onsubmit = submitProfile;
   $("#cpSave").onclick = changePw; $("#cpNew").addEventListener("input", updCpRules);
-  $("#pAccount").querySelectorAll(".eye").forEach(b => (b.onclick = () => { const i = b.previousElementSibling; i.type = i.type === "password" ? "text" : "password"; b.classList.toggle("on", i.type === "text"); }));
+  $("#pAccount").querySelectorAll(".eye").forEach(b => (b.onclick = () => { const i = b.previousElementSibling; i.type = i.type === "password" ? "text" : "password"; const on = i.type === "text"; b.classList.toggle("on", on); b.setAttribute("aria-pressed", String(on)); b.setAttribute("aria-label", on ? "Ocultar contraseña" : "Mostrar contraseña"); }));
   $("#pClose").onclick = $("#pCancel").onclick = () => $("#pdlg").close();
   // ---------- Planner / Teams (módulo planner.js) ----------
   PL = window.QA_PLANNER_UI ? window.QA_PLANNER_UI({
