@@ -4,6 +4,10 @@
   const { ask, askText } = window.QA_UI;
   const DAY = 86400000, today = iso(new Date(Date.now() - new Date().getTimezoneOffset() * 60000));
   const d2n = s => Math.round(Date.parse(s + "T00:00:00Z") / DAY);
+  const fd = s => (/^\d{4}-\d{2}-\d{2}$/.test(s || "") ? `${s.slice(8)}-${s.slice(5, 7)}-${s.slice(0, 4)}` : s || "");   // fechas en pantalla: dd-mm-aaaa
+  const yearsFrom = k => { const d = new Date(today + "T00:00:00Z"); d.setUTCFullYear(d.getUTCFullYear() + k); return d.toISOString().slice(0, 10); };
+  const DATE_MIN = yearsFrom(-10), DATE_MAX = yearsFrom(10), DATE_ERR = "Error: fecha fuera de rango";   // todas las fechas: 10 años atrás y 10 hacia adelante
+  const badDate = v => !!v && (v < DATE_MIN || v > DATE_MAX);
   const n2d = n => new Date(n * DAY).toISOString().slice(0, 10);
   const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const say = (m, err) => {
@@ -59,12 +63,23 @@
   }
   // Error pegado justo ENCIMA del campo que falla (y el campo se marca en rojo). msg vacío = limpiar.
   const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
-  function fieldErr(el, msg) {
-    const host = el.closest("label") || (el.closest("form.inline") || el);
-    let b = host.previousElementSibling;
-    if (!b || !b.classList.contains("ferr")) { if (!msg) return; b = document.createElement("div"); b.className = "ferr"; b.setAttribute("role", "alert"); host.before(b); }
+  function fieldErr(el, msg, quiet) {
+    const lab = el.closest("label"), cell = !lab && el.closest(".rform") ? el.closest("td") : null;
+    const flo = lab && lab.closest(".rform, .rgrid, .pbody") ? lab : cell;        // en los formularios el aviso flota sobre el campo
+    const host = flo || lab || (el.closest("form.inline") || el);
+    let b = flo ? host.querySelector(":scope > .ferr") : host.previousElementSibling;
+    if (!b || !b.classList.contains("ferr")) {
+      if (!msg) return; b = document.createElement("div"); b.className = "ferr"; b.setAttribute("role", "alert");
+      if (flo) { b.classList.add("ferrB"); host.classList.add("ferrhost"); host.prepend(b); }   // no mueve ningún otro campo
+      else host.before(b);
+    }
     b.textContent = msg || ""; b.hidden = !msg; el.classList.toggle("bad", !!msg);
-    if (msg) { el.focus({ preventScroll: false }); el.addEventListener("input", () => fieldErr(el, ""), { once: true }); }
+    if (msg) {
+      if (!quiet) el.focus({ preventScroll: false });
+      const off = () => fieldErr(el, "");
+      setTimeout(() => { el.addEventListener("input", off, { once: true }); el.addEventListener("change", off, { once: true }); document.addEventListener("pointerdown", off, { once: true }); }, 0);   // (después del evento actual, para no borrarse a sí mismo)   // cualquier otra interacción lo quita
+      setTimeout(off, 10000);
+    }
   }
   function showLogin(boot) {
     document.body.classList.remove("booting"); $("#login").hidden = false; $("#app").hidden = true; document.querySelector("header.top").hidden = true; $("#actionbar").hidden = true;
@@ -452,7 +467,7 @@
     const al = alertsList(), st = staleList(), total = al.length + st.length;
     $("#alerts").innerHTML = total ? `<details${alertsOpen ? " open" : ""}><summary><b>${total} alerta${total > 1 ? "s" : ""}</b> · ${al.length} de atraso · ${st.length} sin actualizar</summary>` +
       al.map(x => `<div class="al al${lvl(x.d)}" data-id="${x.r.id}"><b>${lvlTxt(x.d)} de atraso</b> · ${esc(x.r.code)} ${esc(x.r.title)} · <span>${esc(x.what)}</span> · ${esc(mnames(x.r))}</div>`).join("") +
-      st.map(r => `<div class="al alS" data-id="${r.id}"><b>Sin actualizar hace ${staleDays(r)} días hábiles</b> · ${esc(r.code)} ${esc(r.title)} · <span>Último avance: ${ldate(r.lastUpdate)}</span> · ${esc(mnames(r))}</div>`).join("") + "</details>" : "";
+      st.map(r => `<div class="al alS" data-id="${r.id}"><b>Sin actualizar hace ${staleDays(r)} días hábiles</b> · ${esc(r.code)} ${esc(r.title)} · <span>Último avance: ${fd(ldate(r.lastUpdate))}</span> · ${esc(mnames(r))}</div>`).join("") + "</details>" : "";
     $("#alerts").querySelectorAll(".al").forEach(x => (x.onclick = () => openReq(x.dataset.id)));
     { const dt = $("#alerts").querySelector("details"); if (dt) dt.ontoggle = () => { alertsOpen = dt.open; }; }
     $("#kpis").innerHTML = [["Requerimientos", all.length], ["QA Express", c(r => r.type === "express")], ["QA Tradicional", c(r => r.type === "trad")],
@@ -473,8 +488,8 @@
           <td><span class="pill ${BASE_TYPES[r.type] ? r.type : "custom"}">${esc(typeName(r.type))}</span></td><td class="rs">${esc(mnames(r))}<br><small class="muted">${esc(rolesOf(r).join(", "))}</small>${lnames(r) ? `<br><small>Líder: ${esc(lnames(r))}</small>` : ""}</td>
           <td><div class="stk"><span><span class="dot ${health(r).lvl}" title="${esc(health(r).why.join(" · ") || "En plazo")}"></span> <span class="st st-${r.status.replace(" ", "")}">${r.status}</span></span>${late(r) ? `<span class="st al${lvl(daysLate(span(r)[1]))}">Atrasado ${lvlTxt(daysLate(span(r)[1]))}</span>` : ""}</div></td>
           <td class="nw">${prioPill(r)}</td><td>${r.bucket ? esc(r.bucket) : "—"}</td>
-          <td><div class="pbar"><i style="width:${p}%"></i><span>${p}%</span></div></td><td class="nw">${r.deliverables.length ? `${delDone(r)}/${r.deliverables.length}${delOverdue(r).length ? ` <span class="st al3">${delOverdue(r).length} vencido(s)</span>` : ""}` : "—"}</td><td class="nw">${s}</td><td class="nw">${e}${slip(r) ? ` <span class="st al1" title="Comprometida: ${r.committedEnd}">+${slip(r)} d</span>` : ""}</td>
-          <td class="lc">${lc ? `<small>${lc.at.slice(0, 10)} · ${esc(lc.by)}</small><br>${esc(lc.text.slice(0, 90))}` : '<small class="muted">Sin comentarios</small>'} <small class="muted">(${r.comments.length})</small></td></tr>`;
+          <td><div class="pbar"><i style="width:${p}%"></i><span>${p}%</span></div></td><td class="nw">${r.deliverables.length ? `${delDone(r)}/${r.deliverables.length}${delOverdue(r).length ? ` <span class="st al3">${delOverdue(r).length} vencido(s)</span>` : ""}` : "—"}</td><td class="nw">${fd(s)}</td><td class="nw">${fd(e)}${slip(r) ? ` <span class="st al1" title="Comprometida: ${fd(r.committedEnd)}">+${slip(r)} d</span>` : ""}</td>
+          <td class="lc">${lc ? `<small>${fd(lc.at.slice(0, 10))} · ${esc(lc.by)}</small><br>${esc(lc.text.slice(0, 90))}` : '<small class="muted">Sin comentarios</small>'} <small class="muted">(${r.comments.length})</small></td></tr>`;
       }).join("") || `<tr><td colspan="13" class="muted" style="padding:20px">Sin requerimientos. Usa "+ Requerimiento".</td></tr>`) + `</tbody>`;
     const hs = [...$("#tbl").querySelectorAll("thead th")].map(t => t.textContent);   // etiquetas para la vista de tarjetas en móvil
     $("#tbl").querySelectorAll("tbody tr[data-id]").forEach(tr => { [...tr.children].forEach((td, i) => (td.dataset.l = hs[i] || "")); tr.onclick = () => openReq(tr.dataset.id); });
@@ -500,7 +515,7 @@
     }).join("");
     $("#resCli").innerHTML = "<thead><tr><th>Cliente</th><th>Total</th><th>En curso</th><th>Verde</th><th>Amarillo</th><th>Rojo</th><th>Atrasados</th><th>Sin actualizar</th><th>Entreg. vencidos</th><th>Ejecución</th><th>Automatizado</th><th>Defectos abiertos</th></tr></thead><tbody>" + (rows || '<tr><td class="muted">Sin clientes</td></tr>') + "</tbody>";
     const att = hs.filter(x => x.h.lvl !== "g").sort((x, y) => (x.h.lvl === "r" ? 0 : 1) - (y.h.lvl === "r" ? 0 : 1) || span(x.r)[1].localeCompare(span(y.r)[1]));
-    $("#resAtt").innerHTML = att.length ? att.map(({ r, h }) => `<div class="hrow" data-open="${r.id}"><div class="hinfo"><span class="dot ${h.lvl}"></span> <b>${esc(r.code)}</b> · ${esc(r.title)} <small class="muted">${esc(clientName(r.clientId))} · ${esc(mnames(r))} · plazo ${span(r)[1]}</small>
+    $("#resAtt").innerHTML = att.length ? att.map(({ r, h }) => `<div class="hrow" data-open="${r.id}"><div class="hinfo"><span class="dot ${h.lvl}"></span> <b>${esc(r.code)}</b> · ${esc(r.title)} <small class="muted">${esc(clientName(r.clientId))} · ${esc(mnames(r))} · plazo ${fd(span(r)[1])}</small>
       <div class="hact">${esc(h.why.join(" · "))}</div></div><div class="hctl"><button class="ghost">Abrir</button></div></div>`).join("") : '<p class="muted">Nada en riesgo. Todo en plazo 👌</p>';
     $("#resAtt").querySelectorAll("[data-open]").forEach(x => (x.onclick = () => openReq(x.dataset.open)));
   }
@@ -531,7 +546,7 @@
       const blk = a.blocked ? ` · <b class="orange">Bloqueada ${a.blockedSince ? lvlTxt(d2n(today) - d2n(a.blockedSince)) : ""}</b> ${a.blockReason ? "— " + esc(a.blockReason) : ""}` : "";
       return `<div class="hrow" data-r="${r.id}" data-a="${a.id}">
         <div class="hinfo"><b>${esc(r.code)}</b> · ${esc(r.title)} <small class="muted">${esc(clientName(r.clientId))}</small>
-          <div class="hact">${esc(a.name)} · ${esc(mnames(a, r))} · vence ${a.end}${late}${blk}</div></div>
+          <div class="hact">${esc(a.name)} · ${esc(mnames(a, r))} · vence ${fd(a.end)}${late}${blk}</div></div>
         ${readOnly ? `<div class="hctl"><span class="pbar"><i style="width:${a.percent}%"></i><span>${a.percent}%</span></span></div>` : `<div class="hctl">
           <select class="hp" aria-label="Avance">${pctOpts(a.percent)}</select>
           <input class="hc" placeholder="Comentario (obligatorio si bloqueas)" aria-label="Comentario">
@@ -542,14 +557,14 @@
     const stale = staleList().filter(r => !mine || ids(r).includes(me));
     const grp = (key, cls, n, title, body) => `<div class="card hgroup${hoyClosed.has(key) ? " closed" : ""}" data-g="${esc(key)}"><h3 class="${cls} htog" role="button" tabindex="0" aria-expanded="${!hoyClosed.has(key)}" title="Clic para expandir o minimizar"><span class="hcount">${n}</span> ${title}<span class="hchev">▾</span></h3><div class="hbody">${body}</div></div>`;
     let h = groups.map(([t, cls, list]) => grp(t, cls, list.length, t, list.length ? list.sort((x, y) => x.a.end.localeCompare(y.a.end)).map(row).join("") : '<p class="muted">Nada por aquí 👌</p>')).join("");
-    h += grp("stale", "alS", stale.length, `Requerimientos sin actualizar (≥ ${STALE} días hábiles)`, stale.length ? stale.map(r => `<div class="hrow stale" data-open="${r.id}"><div class="hinfo"><b>${esc(r.code)}</b> · ${esc(r.title)} <small class="muted">${esc(clientName(r.clientId))}</small><div class="hact">${esc(mnames(r))} · último avance ${ldate(r.lastUpdate)} (hace ${staleDays(r)} días hábiles)</div></div><div class="hctl"><button class="ghost">Abrir</button></div></div>`).join("") : '<p class="muted">Todo al día 👌</p>');
+    h += grp("stale", "alS", stale.length, `Requerimientos sin actualizar (≥ ${STALE} días hábiles)`, stale.length ? stale.map(r => `<div class="hrow stale" data-open="${r.id}"><div class="hinfo"><b>${esc(r.code)}</b> · ${esc(r.title)} <small class="muted">${esc(clientName(r.clientId))}</small><div class="hact">${esc(mnames(r))} · último avance ${fd(ldate(r.lastUpdate))} (hace ${staleDays(r)} días hábiles)</div></div><div class="hctl"><button class="ghost">Abrir</button></div></div>`).join("") : '<p class="muted">Todo al día 👌</p>');
     $("#hoyBody").innerHTML = h;
     $("#hoyBody").querySelectorAll(".htog").forEach(t => { const toggle = () => { const g = t.closest(".hgroup"), k = g.dataset.g, c = !g.classList.contains("closed"); g.classList.toggle("closed", c); t.setAttribute("aria-expanded", !c); c ? hoyClosed.add(k) : hoyClosed.delete(k); lsSet("qa-hoy-closed", JSON.stringify([...hoyClosed])); }; t.onclick = toggle; t.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } }; });
     $("#hoyBody").querySelectorAll("[data-open]").forEach(x => (x.onclick = () => openReq(x.dataset.open)));
     $("#hoyBody").querySelectorAll(".hrow[data-a] .hs").forEach(btn => (btn.onclick = () => {
       const rowEl = btn.closest(".hrow"), rid = rowEl.dataset.r, aid = rowEl.dataset.a;
       const pct = +rowEl.querySelector(".hp").value, blocked = rowEl.querySelector(".hbk").checked && +rowEl.querySelector(".hp").value < 100, text = rowEl.querySelector(".hc").value.trim();
-      if (blocked && !text && !store.reqs.find(x => x.id === rid)?.acts.find(x => x.id === aid)?.blockReason) return say("Indica el motivo del bloqueo en el comentario.", 1);
+      if (blocked && !text && !store.reqs.find(x => x.id === rid)?.acts.find(x => x.id === aid)?.blockReason) return fieldErr(rowEl.querySelector(".hc"), "Indica el motivo del bloqueo en el comentario.");
       const wasBlocked0 = !!store.reqs.find(x => x.id === rid)?.acts.find(x => x.id === aid)?.blocked;
       const by = authorName(), at = new Date().toISOString(), cid = uid();
       commit(s => {
@@ -589,7 +604,7 @@
       const [s, e] = span(r), p = progress(r), st = "st-" + (late(r) && r.status !== "Bloqueado" ? "Atrasado" : r.status.replace(" ", ""));
       const exp = !r.acts.length;
       h += `<div class="g-row grp"><div class="g-label" data-open="${r.id}">${esc(r.code)} · ${esc(r.title)}<small>${r.type !== "trad" ? esc(typeName(r.type)) + " · " : ""}${esc(mnames(r))} · ${p}%</small></div>
-        <div class="g-track" style="width:${W}px">${r.committedEnd && r.committedEnd !== e ? `<i class="cmark" style="left:${x(d2n(r.committedEnd) + 1)}px" title="Fecha comprometida ${r.committedEnd}"></i>` : ""}${exp ? bar("req", r.id, r, st, r.code, p, true) : bar("sum", r.id, { start: s, end: e }, "st-sum", "", p, false)}</div></div>`;
+        <div class="g-track" style="width:${W}px">${r.committedEnd && r.committedEnd !== e ? `<i class="cmark" style="left:${x(d2n(r.committedEnd) + 1)}px" title="Fecha comprometida ${fd(r.committedEnd)}"></i>` : ""}${exp ? bar("req", r.id, r, st, r.code, p, true) : bar("sum", r.id, { start: s, end: e }, "st-sum", "", p, false)}</div></div>`;
       if (!exp) for (const a of r.acts) {
         const ast = a.blocked ? "st-Bloqueado" : a.percent >= 100 ? "st-Completado" : a.end < today ? "st-Atrasado" : a.percent > 0 ? "st-Encurso" : "st-Pendiente";
         h += `<div class="g-row"><div class="g-label" data-open="${r.id}">&nbsp;&nbsp;${esc(a.name)}<small>${esc(mnames(a, r))}</small></div><div class="g-track" style="width:${W}px">${bar("act", r.id + "|" + a.id, a, ast, a.percent + "%", a.percent, true)}</div></div>`;
@@ -622,6 +637,7 @@
         bar.removeEventListener("pointermove", mv); bar.removeEventListener("pointerup", up);
         if (!bar._moved) return;
         const [rid, aid] = bar.dataset.id.split("|"), ns = n2d(bar._ns), ne = n2d(bar._ne), r = store.reqs.find(x => x.id === rid);
+        if (badDate(ns) || badDate(ne)) { say(DATE_ERR + ": solo se permiten fechas entre " + fd(DATE_MIN) + " y " + fd(DATE_MAX) + ".", 1); render(); setTimeout(() => (bar._moved = false), 0); return; }
         const prev = { start: t.start, end: t.end }, oldEnd = span(r)[1];
         t.start = ns; t.end = ne; const newEnd = span(r)[1]; t.start = prev.start; t.end = prev.end;      // simulación
         let why = "";
@@ -809,15 +825,15 @@
     f.querySelectorAll("input,select,textarea").forEach(e => { if (e.id !== "newComment") e.disabled = readOnly; });
     $("#newComment").disabled = readOnly && !D.remote; $("#btnComment").hidden = readOnly && !D.remote; $("#rSave").hidden = readOnly; $("#rDelete").hidden = readOnly || isNew;
     f.querySelectorAll("[data-edit]").forEach(e => { if (e.id !== "rSave" && e.id !== "rDelete") e.hidden = readOnly; });
-    $("#dlg").showModal(); autosize($("#actTbl"));
+    $("#dlg").showModal(); autosize($("#actTbl")); syncCm();
     try { readForm(); } catch {} openSnap = JSON.stringify(draft);        // foto inicial para detectar cambios sin guardar
   }
   function renderCommit() {
     const b = $("#commitBox"); if (isNew || !draft.committedEnd) { b.hidden = true; return; }
     const cur = span(draft)[1], d = d2n(cur) - d2n(draft.committedEnd);
     b.hidden = false;
-    b.innerHTML = `<b>Compromiso:</b> ${draft.committedEnd} · <b>Plazo actual:</b> ${cur} ${d > 0 ? `<span class="st al1">+${d} días</span>` : d < 0 ? `<span class="st st-Completado">${d} días</span>` : '<span class="st st-Completado">en plazo</span>'}` +
-      (draft.dateLog.length ? `<details><summary>Historial de cambios de plazo (${draft.dateLog.length})</summary>` + draft.dateLog.map(l => `<div class="dl"><small>${new Date(l.at).toLocaleString("es")} · <b>${esc(l.by)}</b></small><br>${l.from} → ${l.to}: ${esc(l.reason)}</div>`).join("") + "</details>" : "");
+    b.innerHTML = `<b>Compromiso:</b> ${fd(draft.committedEnd)} · <b>Plazo actual:</b> ${fd(cur)} ${d > 0 ? `<span class="st al1">+${d} días</span>` : d < 0 ? `<span class="st st-Completado">${d} días</span>` : '<span class="st st-Completado">en plazo</span>'}` +
+      (draft.dateLog.length ? `<details><summary>Historial de cambios de plazo (${draft.dateLog.length})</summary>` + draft.dateLog.map(l => `<div class="dl"><small>${new Date(l.at).toLocaleString("es")} · <b>${esc(l.by)}</b></small><br>${fd(l.from)} → ${fd(l.to)}: ${esc(l.reason)}</div>`).join("") + "</details>" : "");
   }
   function syncType() {
     $("#actsBox").hidden = false; $("#pctRow").hidden = true; $("#datesRow").hidden = true;
@@ -861,7 +877,7 @@
     const m = draft.metrics;
     $("#metBox").querySelectorAll("[data-m]").forEach(el => {
       el.value = m[el.dataset.m] ?? ""; el.disabled = readOnly;
-      if (el.type === "number") el.onkeydown = e => { if (/^[eE+-.,]$/.test(e.key)) e.preventDefault(); };       // solo números enteros
+      if (el.type === "number") el.onkeydown = e => { if (/^[eE+\-.,]$/.test(e.key)) e.preventDefault(); };       // solo números enteros
       el.oninput = () => {
         if (el.type === "number" && el.value !== "") { const v = Math.min(10000, Math.max(0, Math.floor(+el.value))); if (String(v) !== el.value) el.value = v; }   // máximo 10000
         m[el.dataset.m] = el.type === "number" ? (el.value === "" ? "" : +el.value) : el.value.trim(); calcMet();
@@ -932,10 +948,10 @@
       if (isNew) return;
       D.qaComment(draft.id, cm).then(() => { const r = store.reqs.find(x => x.id === draft.id); if (r && !r.comments.some(k => k.id === cm.id)) { r.comments.push(cm); r.lastUpdate = cm.at; } render(); say("Comentario agregado ✓"); })
         .catch(er => { draft.comments = draft.comments.filter(k => k.id !== cm.id); renderThread(); say(/function .* does not exist|schema cache/i.test(er.message) ? "Falta ejecutar supabase-comentarios.sql en Supabase." : "No se pudo comentar: " + er.message, 1); });
-      $("#newComment").value = ""; renderThread(); return;
+      $("#newComment").value = ""; syncCm(); renderThread(); return;
     }
     if (!isNew) { const id = draft.id; commit(s => { const r = s.reqs.find(x => x.id === id); if (r && !r.comments.some(k => k.id === cm.id)) { r.comments.push(cm); r.lastUpdate = cm.at; } }); render(); }
-    $("#newComment").value = ""; renderThread();
+    $("#newComment").value = ""; syncCm(); renderThread();
   }
   async function submitReq(e) {
     e.preventDefault();
@@ -946,13 +962,13 @@
     readForm();
     const form = $("#rform"), bad = [];
     form.querySelectorAll(".bad").forEach(el => el.classList.remove("bad"));
-    const mark = (el, why) => { if (el) { el.classList.add("bad"); bad.push(why); } };
+    const mark = (el, why) => { if (!el) return; bad.push(why); if (why) fieldErr(el, why, bad.filter(Boolean).length > 1); else el.classList.add("bad"); };   // el mensaje sale arriba del propio campo
     for (const [k, n] of [["clientId", "Cliente"], ["code", "Código"], ["title", "Título"]]) if (!String(draft[k] || "").trim()) mark(form[k], `${n} es obligatorio`);
     const was = store.reqs.find(r => r.id === draft.id);        // un código o título antiguo con símbolos no obliga a cambiarlos mientras no se editen
     if (String(draft.code || "").trim() && (isNew || draft.code !== was?.code) && !CODE_RE.test(draft.code)) mark(form.code, "El código debe ser 1 letra seguida de hasta 8 números, sin símbolos (ejemplo: R1903)");
     if (String(draft.title || "").trim() && (isNew || draft.title !== was?.title) && !TITLE_RE.test(draft.title)) mark(form.title, "El título solo admite letras, números, espacios y estos signos: ( ) # $ / -");
     if (String(draft.bucket || "").trim() && (isNew || draft.bucket !== was?.bucket) && !STAGE_RE.test(draft.bucket)) mark(form.bucket, "La etapa del proyecto solo admite letras y espacios (sin números, símbolos ni caracteres especiales)");
-    const HTTP_RE = /^https?:///i;
+    const HTTP_RE = /^https?:\/\//i;
     const wiUrl = form.querySelector('[data-m="wiUrl"]'); if (wiUrl && (!wiUrl.checkValidity() || (wiUrl.value.trim() && !HTTP_RE.test(wiUrl.value.trim())))) mark(wiUrl, "El enlace al work item debe comenzar con https://");
     form.querySelectorAll('[data-df="url"]').forEach((el, i) => { if (el.value.trim() && (!el.checkValidity() || !HTTP_RE.test(el.value.trim()))) mark(el, `Entregable ${i + 1}: el enlace debe comenzar con https://`); });
     { const mv = k => { const el = form.querySelector(`[data-m="${k}"]`); return el && el.value !== "" ? +el.value : null; }, dsg = mv("designed"), exe = mv("executed"), pas = mv("passed"), fal = mv("failed"), aut = mv("automated");
@@ -961,6 +977,7 @@
       if (exe != null && (pas || 0) + (fal || 0) > exe) mark(q("passed"), "Aprobados + fallidos no puede superar los casos ejecutados");
       if (dsg != null && aut != null && aut > dsg) mark(q("automated"), "Automatizados no puede ser mayor que los casos diseñados"); }
     if (!draft.acts.length) { mark($("#btnActAdd"), "Agrega al menos una actividad"); mark($("#actTbl"), ""); }
+    form.querySelectorAll('input[type="date"]').forEach(el => { if (el.value && el.offsetParent !== null && badDate(el.value)) mark(el, DATE_ERR); });
     // fechas opcionales: si se dejan vacías se completan con la actividad anterior (inicio) o con el inicio (fin)
     draft.acts.forEach((a, i) => {
       if (!a.start) a.start = i ? addDays(draft.acts[i - 1].end || draft.acts[i - 1].start, 1) : (draft.start || today);
@@ -971,7 +988,7 @@
       if (String(a.name || "").length > 500) mark(row?.querySelector('[data-f="name"]'), `Actividad ${i + 1}: el nombre no puede superar los 500 caracteres`);
       if (a.end < a.start) { mark(row?.querySelector('[data-f="end"]'), `Actividad ${i + 1}: la fecha de fin es anterior al inicio`); mark(row?.querySelector('[data-f="start"]'), ""); }
     });
-    if (bad.length) { form.querySelector(".bad")?.scrollIntoView({ block: "center" }); return say("Revisa los campos marcados en rojo: " + [...new Set(bad.filter(Boolean))].join("; ") + ".", 1); }
+    if (bad.length) { (form.querySelector(".ferr:not([hidden])") || form.querySelector(".bad"))?.scrollIntoView({ block: "center" }); return; }
     [draft.start, draft.end] = span(draft);
     const prev = store.reqs.find(r => r.id === draft.id), manual = !!prev && prev.status !== draft.status;   // si elegiste el estado a mano, se respeta
     { const p = progress(draft), anyB = draft.acts.some(a => a.blocked); draft.percent = p;
@@ -982,7 +999,7 @@
     draft.dateLog ||= []; draft.lastUpdate = new Date().toISOString();
     if (!old || !draft.committedEnd) draft.committedEnd = draft.end;
     if (old && old.end !== draft.end) {
-      const why = await askReason(`${draft.code}: el plazo cambia de ${old.end} a ${draft.end}.`); if (why === null) return;
+      const why = await askReason(`${draft.code}: el plazo cambia de ${fd(old.end)} a ${fd(draft.end)}.`); if (why === null) return;
       draft.dateLog = [...draft.dateLog, { at: draft.lastUpdate, by: authorName(), from: old.end, to: draft.end, reason: why }];
     }
     const i = store.reqs.findIndex(r => r.id === draft.id);
@@ -1043,7 +1060,7 @@
     if (v instanceof Date && !isNaN(v)) { const d = new Date(v.getTime() + 60000); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }   // SheetJS: los componentes locales son los de la celda
     if (typeof v === "number") return iso(new Date(Math.round((v - 25569) * 86400000)));            // serial de Excel
     const s = String(v).trim(); let m;
-    const real = x => { const d = new Date(x + "T00:00:00Z"); return !isNaN(d) && d.toISOString().slice(0, 10) === x ? x : null; };
+    const real = x => { const d = new Date(x + "T00:00:00Z"); return !isNaN(d) && d.toISOString().slice(0, 10) === x && !badDate(x) ? x : null; };
     if ((m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/))) return real(`${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`);
     if ((m = s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})/))) return real(`${m[3].length === 2 ? "20" + m[3] : m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`);
     return null;
@@ -1195,8 +1212,8 @@
     const row = (cl, req, act, who, s, e, pct, st, tipo, bold) => `<tr style="${bold ? "font-weight:bold;background:#eef2fb;" : ""}"><td>${esc(cl)}</td><td>${esc(req)}</td><td>${esc(act)}</td><td>${esc(who)}</td><td>${esc(s)}</td><td>${esc(e)}</td><td style="text-align:center">${esc(pct)}%</td><td style="color:${COL[st]};font-weight:bold">${esc(st)}</td><td>${esc(tipo)}</td>${cols.map(n => cell(n, d2n(s), d2n(e), pct, COL[st])).join("")}</tr>`;
     for (const r of list) {
       const [s, e] = span(r), p = progress(r), rs = reqSt(r), cn = clientName(r.clientId), nm = `${r.code} · ${r.title}`;
-      t += row(cn, nm, r.acts.length ? "(resumen)" : "—", mnames(r), s, e, p, rs, typeName(r.type), true);
-      r.acts.forEach(a => (t += row("", "", a.name, mnames(a, r), a.start, a.end, a.percent, actSt(a), "", false)));
+      t += row(cn, nm, r.acts.length ? "(resumen)" : "—", mnames(r), fd(s), fd(e), p, rs, typeName(r.type), true);
+      r.acts.forEach(a => (t += row("", "", a.name, mnames(a, r), fd(a.start), fd(a.end), a.percent, actSt(a), "", false)));
     }
     return t + "</table>";
   }
@@ -1219,7 +1236,7 @@
   const csvSafe = c => { const s = String(c ?? ""); return /^[=+\-@\t\r]/.test(s) ? "'" + s : s; };   // evita que Excel ejecute fórmulas escritas en un título o comentario
   function csv() {
     const rows = [["Cliente", "Código", "Título", "Tipo", "Responsable", "Estado", "Prioridad", "Etapa del proyecto", "Avance %", "Inicio", "Fin", "Comentarios"]].concat(visible().map(r => {
-      const [s, e] = span(r); return [clientName(r.clientId), r.code, r.title, typeName(r.type), mnames(r), r.status, r.priority || "", r.bucket || "", progress(r), s, e, r.comments.map(c => `${c.at.slice(0, 10)} ${c.by}: ${c.text}`).join(" | ")];
+      const [s, e] = span(r); return [clientName(r.clientId), r.code, r.title, typeName(r.type), mnames(r), r.status, r.priority || "", r.bucket || "", progress(r), fd(s), fd(e), r.comments.map(c => `${fd(c.at.slice(0, 10))} ${c.by}: ${c.text}`).join(" | ")];
     }));
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob(["﻿" + rows.map(r => r.map(c => `"${csvSafe(c).replace(/"/g, '""')}"`).join(",")).join("\r\n")], { type: "text/csv" }));
@@ -1270,9 +1287,9 @@
     f.reset(); document.querySelectorAll("#leaderRole input").forEach(x => (x.checked = false)); save(); render(); say("Responsable agregado ✓");
   };
   $("#leaderRoleForm").onsubmit = e => { e.preventDefault(); if (readOnly) return; const v = e.target.role.value.trim(); if (!v) return fieldErr(e.target.role, "Escribe el nombre del rol."); fieldErr(e.target.role, ""); if (store.leaderRoles.some(r => norm(r) === norm(v))) return fieldErr(e.target.role, "Ese rol ya existe."); store.leaderRoles.push(v); e.target.reset(); save(); render(); say("Rol creado ✓"); };
-  $("#roleForm").onsubmit = e => { e.preventDefault(); if (readOnly) return; const v = e.target.role.value.trim(); if (store.roles.includes(v)) return say("Ese rol ya existe.", 1); store.roles.push(v); e.target.reset(); save(); render(); };
+  $("#roleForm").onsubmit = e => { e.preventDefault(); if (readOnly) return; const v = e.target.role.value.trim(); if (!v) return fieldErr(e.target.role, "Escribe el nombre del rol."); if (store.roles.some(x => norm(x) === norm(v))) return fieldErr(e.target.role, "Ese rol ya existe."); store.roles.push(v); e.target.reset(); save(); render(); };
   $("#clientSel").onchange = e => { clientId = e.target.value; lsSet("qa-client", clientId); render(); };
-  $("#clientForm").onsubmit = e => { e.preventDefault(); if (readOnly) return; const v = e.target.name.value.trim(); if (!v) return; if (store.clients.some(c => c.name.toLowerCase() === v.toLowerCase())) return say("Ese cliente ya existe.", 1); const c = { id: uid(), name: v }; store.clients.push(c); e.target.reset(); save(); clientId = c.id; lsSet("qa-client", clientId); render(); say("Cliente creado y seleccionado ✓"); };
+  $("#clientForm").onsubmit = e => { e.preventDefault(); if (readOnly) return; const v = e.target.name.value.trim(); if (!v) return fieldErr(e.target.name, "Escribe el nombre del cliente."); if (store.clients.some(c => c.name.toLowerCase() === v.toLowerCase())) return fieldErr(e.target.name, "Ese cliente ya existe."); const c = { id: uid(), name: v }; store.clients.push(c); e.target.reset(); save(); clientId = c.id; lsSet("qa-client", clientId); render(); say("Cliente creado y seleccionado ✓"); };
   document.querySelectorAll(".tplAdd").forEach(b => (b.onclick = () => { store.templates[b.dataset.k].push({ name: "Nueva actividad", days: 1, unit: "d" }); save(); renderTpl(); }));
   document.querySelectorAll(".tplReset").forEach(b => (b.onclick = async () => { if (await ask("¿Restaurar esta plantilla por defecto?")) { store.templates[b.dataset.k] = D.defaultTemplates()[b.dataset.k]; save(); renderTpl(); } }));
   $("#rform").type.onchange = async () => {
@@ -1293,10 +1310,16 @@
     store.customTpl.push({ id: uid(), name, acts: [{ name: "Nueva actividad", days: 1, unit: "d" }] }); save(); renderTpl(); render(); say("Tipo creado ✓ (ya está disponible en el campo Tipo)");
   };
   $("#btnComment").onclick = addComment;
+  const syncCm = () => { $("#btnComment").disabled = !$("#newComment").value.trim(); };   // «Agregar comentario» solo con texto
+  $("#newComment").addEventListener("input", syncCm); syncCm();
+  const checkDate = el => { if (el.type === "date" && el.name !== "cumpleanos") { if (badDate(el.value)) fieldErr(el, DATE_ERR, true); else fieldErr(el, ""); } };
+  ["input", "change", "focusout"].forEach(t => document.addEventListener(t, e => checkDate(e.target), true));
+  const boundDates = () => document.querySelectorAll('input[type="date"]').forEach(el => { if (el.name !== "cumpleanos") { el.min = DATE_MIN; el.max = DATE_MAX; } });
+  boundDates(); new MutationObserver(() => boundDates()).observe(document.body, { childList: true, subtree: true });
   $("#rform").onsubmit = submitReq;
   // campos inválidos (p. ej. Código/Título vacío, enlace mal escrito) bloquean el envío sin avisar si quedan fuera de vista
   ["input", "change"].forEach(t => $("#rform").addEventListener(t, ev => ev.target.classList?.remove("bad")));
-  $("#rform").addEventListener("invalid", ev => { ev.target.classList.add("bad"); const l =ev.target.closest("label"); say(`Campo inválido: ${(l ? (l.querySelector(":scope > .lcap")?.firstChild || l.childNodes[0]).textContent : ev.target.name || "").trim().replace(/\s*\*$/, "")} — ${ev.target.validationMessage}`, 1); }, true);
+  $("#rform").addEventListener("invalid", ev => { ev.preventDefault(); fieldErr(ev.target, ev.target.type === "date" ? DATE_ERR : ev.target.validationMessage, true); }, true);   // el aviso sale sobre el campo, no en un globo aparte
   $("#rCancel").onclick = $("#rClose").onclick = async () => { if (dirtyReq() && !await ask("Tienes cambios sin guardar. ¿Descartarlos?")) return; $("#dlg").close(); };
   $("#dlg").addEventListener("cancel", async e => { e.preventDefault(); if (!dirtyReq() || await ask("Tienes cambios sin guardar. ¿Descartarlos?", { title: "Cambios sin guardar", ok: "Descartar", danger: true })) $("#dlg").close(); });   // tecla Escape
   $("#rDelete").onclick = async () => { if (await ask("¿Eliminar este requerimiento y su seguimiento?")) { store.reqs = store.reqs.filter(r => r.id !== draft.id); save(); $("#dlg").close(); render(); } };
