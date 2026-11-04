@@ -6,7 +6,7 @@ returns void language plpgsql security definer set search_path = public as $$
 declare st jsonb; idx int; v_text text := trim(coalesce(p_text, '')); v_at text := to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"');
 begin
   if coalesce(public.my_role(), '') not in ('viewer', 'editor', 'admin') then raise exception 'No tienes permiso para comentar'; end if;
-  if v_text = '' or length(v_text) > 2000 then raise exception 'El comentario debe tener entre 1 y 2000 caracteres'; end if;
+  if v_text = '' or length(v_text) > 5000 then raise exception 'El comentario debe tener entre 1 y 5000 caracteres'; end if;
   select data into st from public.app_state where id = 1 for update;
   select (t.ord - 1)::int into idx from jsonb_array_elements(st->'reqs') with ordinality as t(v, ord) where t.v->>'id' = p_req;
   if idx is null then raise exception 'Requerimiento no encontrado'; end if;
@@ -27,7 +27,7 @@ declare st jsonb; ri int; ci int; c jsonb; v_text text := trim(coalesce(p_text, 
         v_at text := to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'); v_mail text := lower(coalesce(auth.jwt()->>'email', ''));
 begin
   if coalesce(public.my_role(), '') not in ('viewer', 'editor', 'admin') then raise exception 'No tienes permiso para comentar'; end if;
-  if v_text = '' or length(v_text) > 2000 then raise exception 'El comentario debe tener entre 1 y 2000 caracteres'; end if;
+  if v_text = '' or length(v_text) > 5000 then raise exception 'El comentario debe tener entre 1 y 5000 caracteres'; end if;
   select data into st from public.app_state where id = 1 for update;
   select (t.ord - 1)::int into ri from jsonb_array_elements(st->'reqs') with ordinality as t(v, ord) where t.v->>'id' = p_req;
   if ri is null then raise exception 'Requerimiento no encontrado'; end if;

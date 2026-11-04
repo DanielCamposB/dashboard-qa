@@ -289,17 +289,17 @@
         const v = i.value.trim(); if (v && !urlOk(v)) return A.fieldErr(i, "La URL no parece un webhook de Teams / Power Automate (debe ser https y de Microsoft).");
         A.fieldErr(i, ""); setUrl(i.dataset.avUrl, v);
       }));
-      root.querySelectorAll("[data-av-urlrm]").forEach(b => (b.onclick = () => { if (confirm("¿Quitar la URL de este cliente? Dejará de recibir avisos.")) setUrl(b.dataset.avUrlrm, ""); }));
+      root.querySelectorAll("[data-av-urlrm]").forEach(b => (b.onclick = async () => { if (await QA_UI.ask("¿Quitar la URL de este cliente? Dejará de recibir avisos.")) setUrl(b.dataset.avUrlrm, ""); }));
       root.querySelectorAll("[data-avc]").forEach(cb => (cb.onchange = () => { A.commit(s => { const c = s.clients.find(x => x.id === cb.dataset.cid); if (c) { c.teams ||= {}; (c.teams.events ||= {})[cb.dataset.avc] = cb.checked; } }); if (cb.dataset.avc === "auto") A.render(); say("Guardado ✓"); }));
       const run = async (btn, fn) => { btn.disabled = true; try { say(await fn()); } finally { btn.disabled = false; } };
       root.querySelectorAll("[data-av-test]").forEach(b => (b.onclick = () => run(b, async () => { const c = store().clients.find(x => x.id === b.dataset.avTest), r = await sendTeams(c, `Prueba · Dashboard QA · ${c.name}`, [["Enviado por", A.authorName()]], ["Si ves este mensaje, la conexión con el canal funciona ✅"]); return `${c.name}: ` + (r.ok ? (r.unconfirmed ? "prueba enviada, revisa el canal de Teams" : "prueba enviada ✓") : r.err); })));
-      root.querySelectorAll("[data-av-now]").forEach(b => (b.onclick = () => { const c = store().clients.find(x => x.id === b.dataset.avNow); if (confirm(`¿Enviar ahora el resumen de ${c.name} a su canal?`)) run(b, () => sendChannelNow(c)); }));
-      root.querySelectorAll("[data-av-own]").forEach(b => (b.onclick = () => { const c = store().clients.find(x => x.id === b.dataset.avOwn), ds = ownerDigests(c); if (!ds.length) return say(`${c.name}: ningún responsable con pendientes o con correo en Equipo.`, 1); if (confirm(`Se enviará un mensaje personal a ${ds.length} persona(s) de ${c.name}. ¿Continuar?`)) run(b, () => sendOwnersNow(c)); }));
+      root.querySelectorAll("[data-av-now]").forEach(b => (b.onclick = async () => { const c = store().clients.find(x => x.id === b.dataset.avNow); if (await QA_UI.ask(`¿Enviar ahora el resumen de ${c.name} a su canal?`)) run(b, () => sendChannelNow(c)); }));
+      root.querySelectorAll("[data-av-own]").forEach(b => (b.onclick = async () => { const c = store().clients.find(x => x.id === b.dataset.avOwn), ds = ownerDigests(c); if (!ds.length) return say(`${c.name}: ningún responsable con pendientes o con correo en Equipo.`, 1); if (await QA_UI.ask(`Se enviará un mensaje personal a ${ds.length} persona(s) de ${c.name}. ¿Continuar?`)) run(b, () => sendOwnersNow(c)); }));
       const selList = pred => { const cur = A.clientId(); return store().clients.filter(c => (cur === "all" || c.id === cur) && pred(c)); };
       const sel = root.querySelector("#avSel");
-      if (sel) sel.onclick = () => { const list = selList(teamsOn); if (!list.length) return say("El cliente elegido no tiene URL de canal.", 1); if (confirm(`¿Enviar ahora el resumen al canal de: ${list.map(c => c.name).join(", ")}?`)) run(sel, async () => { const res = []; for (const c of list) res.push(await sendChannelNow(c)); return res.join("  |  "); }); };
+      if (sel) sel.onclick = async () => { const list = selList(teamsOn); if (!list.length) return say("El cliente elegido no tiene URL de canal.", 1); if (await QA_UI.ask(`¿Enviar ahora el resumen al canal de: ${list.map(c => c.name).join(", ")}?`)) run(sel, async () => { const res = []; for (const c of list) res.push(await sendChannelNow(c)); return res.join("  |  "); }); };
       const selO = root.querySelector("#avSelOwn");
-      if (selO) selO.onclick = () => { const list = selList(c => ownerDigests(c).length); if (!list.length) return say("El cliente elegido no tiene responsables con pendientes y correo en Equipo.", 1); if (confirm(`¿Enviar ahora mensajes personales de: ${list.map(c => c.name).join(", ")}?`)) run(selO, async () => { const res = []; for (const c of list) res.push(await sendOwnersNow(c)); return res.join("  |  "); }); };
+      if (selO) selO.onclick = async () => { const list = selList(c => ownerDigests(c).length); if (!list.length) return say("El cliente elegido no tiene responsables con pendientes y correo en Equipo.", 1); if (await QA_UI.ask(`¿Enviar ahora mensajes personales de: ${list.map(c => c.name).join(", ")}?`)) run(selO, async () => { const res = []; for (const c of list) res.push(await sendOwnersNow(c)); return res.join("  |  "); }); };
       const upd = fn => { A.commit(s => { s.notify ||= {}; s.notify.times ||= []; s.notify.days ||= []; fn(s.notify); if (!/^(localhost|127\.)/.test(location.hostname)) s.notify.siteUrl = location.href.split("#")[0]; }); };
       const okT = t => /^([01]\d|2[0-3]):[0-5]\d$/.test(t), norm = l => [...new Set(l.filter(okT))].sort();
       root.querySelector("#avMaster").onchange = e => { upd(n => { n.auto = e.target.checked; }); say(e.target.checked ? "Envío automático activado ✓" : "Envío automático apagado: no saldrá ningún aviso programado."); };
@@ -313,7 +313,7 @@
         catch (e) { say(/row-level|permission|policy|notify_secrets|does not exist/i.test(String(e.message)) ? "No se pudo guardar: solo un administrador puede, y hay que ejecutar supabase-seguridad.sql." : "No se pudo guardar: " + e.message, 1); }
       };
       const au = root.querySelector("#avUser"); if (au) au.onchange = e => { const v = e.target.value.trim(); if (v && !urlOk(v)) return A.fieldErr(e.target, "La URL no parece un webhook de Teams / Power Automate (https de Microsoft)."); A.fieldErr(e.target, ""); setUser(v); };
-      const aur = root.querySelector("#avUserRm"); if (aur) aur.onclick = () => { if (confirm("¿Quitar la URL de mensajes personales?")) setUser(""); };
+      const aur = root.querySelector("#avUserRm"); if (aur) aur.onclick = async () => { if (await QA_UI.ask("¿Quitar la URL de mensajes personales?")) setUser(""); };
       root.querySelector("#avTest").onclick = async () => {
         const inp = root.querySelector("#avTestTo"), em = inp.value.trim().toLowerCase();
         if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)) return A.fieldErr(inp, "Escribe un correo válido de Teams, por ejemplo nombre@tu-organizacion.cl.");
@@ -469,18 +469,7 @@
         const ga = q("[data-go-avisos]"); if (ga) ga.onclick = () => document.querySelector('#tabs [data-v="avisos"]').click();
       });
     }
-    // burbuja de ayuda de los signos «!» (flotante: no se recorta dentro de las tablas)
-    if (!document.querySelector(".tipbox")) {
-      const tip = document.createElement("div"); tip.className = "tipbox"; tip.hidden = true; tip.setAttribute("role", "tooltip"); document.body.appendChild(tip);
-      const show = h => { tip.textContent = h.dataset.tip; tip.hidden = false; const r = h.getBoundingClientRect(), w = tip.offsetWidth; tip.style.left = Math.max(8, Math.min(innerWidth - w - 8, r.left + r.width / 2 - w / 2)) + "px"; tip.style.top = r.bottom + 8 + "px"; };
-      const hide = () => { tip.hidden = true; };
-      document.addEventListener("mouseover", e => { const h = e.target.closest?.(".qhint"); if (h) show(h); });
-      document.addEventListener("mouseout", e => { if (e.target.closest?.(".qhint")) hide(); });
-      document.addEventListener("focusin", e => { const h = e.target.closest?.(".qhint"); if (h) show(h); });
-      document.addEventListener("focusout", hide);
-      document.addEventListener("click", e => { const h = e.target.closest?.(".qhint"); if (h) show(h); else hide(); });
-      window.addEventListener("scroll", hide, true);
-    }
+    // la burbuja de ayuda de los signos «!» la maneja tips.js
     P.session().then(n => { acct = n; }).catch(() => {});
     return {
       cardHtml, bind, sync, syncActive, summaryFor, sendTeams, sendUser, ownerDigests, avisosHtml, avisosBind,

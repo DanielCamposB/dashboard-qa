@@ -1,6 +1,7 @@
 (async function () {
   const D = window.QA_DATA, { addDays, uid, iso } = D;
   const $ = s => document.querySelector(s);
+  const { ask, askText } = window.QA_UI;
   const DAY = 86400000, today = iso(new Date(Date.now() - new Date().getTimezoneOffset() * 60000));
   const d2n = s => Math.round(Date.parse(s + "T00:00:00Z") / DAY);
   const n2d = n => new Date(n * DAY).toISOString().slice(0, 10);
@@ -66,7 +67,7 @@
     if (msg) { el.focus({ preventScroll: false }); el.addEventListener("input", () => fieldErr(el, ""), { once: true }); }
   }
   function showLogin(boot) {
-    $("#login").hidden = false; $("#app").hidden = true; document.querySelector("header.top").hidden = true; $("#actionbar").hidden = true;
+    document.body.classList.remove("booting"); $("#login").hidden = false; $("#app").hidden = true; document.querySelector("header.top").hidden = true; $("#actionbar").hidden = true;
     document.body.classList.add("on-login"); drawArt();
     const f = $("#loginForm"), err = $("#loginErr"), info = $("#loginInfo");
     let mode = boot.recovery ? "newpw" : "login", resetEmail = "", tick = null;
@@ -158,6 +159,7 @@
   }
   const boot = await D.init().catch(e => ({ needLogin: true, initError: e }));
   if (boot.needLogin || boot.denied || boot.pending || boot.locked) { showLogin(boot); return; }
+  document.body.classList.remove("booting");            // ya hay sesión y datos: recién ahora se muestra el sitio
   let store = boot.store, readOnly = boot.forceRead ?? (lsGet("qa-mode", "edit") === "read"), pxDay = +lsGet("qa-zoom", 14), draft = null, isNew = false;
   let PL = null;                                       // módulo Planner/Teams (planner.js)
   const save = () => D.save(store);
@@ -218,6 +220,7 @@
   const ldate = s => (s ? iso(new Date(new Date(s).getTime() - new Date().getTimezoneOffset() * 60000)) : "");   // fecha local de un instante ISO
   const staleDays = r => (r.status === "Completado" ? 0 : bizDaysSince(ldate(r.lastUpdate) || today));
   const staleList = () => scoped().filter(r => staleDays(r) >= STALE).sort((x, y) => staleDays(y) - staleDays(x));
+  const isAdm = () => (D.remote ? D.isAdmin() : !readOnly);   // Clientes, Avisos y Plantillas, y editar/eliminar en Equipo y Responsables, son del administrador
   const authorName = () => lsGet("qa-author", "") || "Anónimo";
   const commit = op => { op(store); D.queueOp(op); save(); };   // cambio pequeño que se puede re-aplicar si otra persona guardó antes
   const slip = r => (r.committedEnd && span(r)[1] > r.committedEnd ? d2n(span(r)[1]) - d2n(r.committedEnd) : 0);
@@ -367,7 +370,7 @@
         (rows.length ? rows.map(r => `<tr><td>${new Date(r.taken_at).toLocaleString("es", { dateStyle: "short", timeStyle: "short" })}</td><td>${esc(BK_KIND[r.kind] || r.kind)}</td><td>${r.nreqs}</td><td>${r.nclients}</td><td>${r.kb} KB</td><td><button type="button" class="ghost" data-bk="${r.id}">Restaurar</button></td></tr>`).join("") : '<tr><td colspan="6" class="muted">Aún no hay copias.</td></tr>') + "</tbody>";
       tbl.querySelectorAll("[data-bk]").forEach(b => (b.onclick = async () => {
         const r = rows.find(x => String(x.id) === b.dataset.bk);
-        if (!confirm(`¿Restaurar la copia del ${new Date(r.taken_at).toLocaleString("es")} (${r.nreqs} requerimientos)?\n\nLos datos actuales se reemplazan; antes se guarda una copia de ellos.`)) return;
+        if (!await ask(`¿Restaurar la copia del ${new Date(r.taken_at).toLocaleString("es")} (${r.nreqs} requerimientos)?\n\nLos datos actuales se reemplazan; antes se guarda una copia de ellos.`)) return;
         try { await D.restoreBackup(+b.dataset.bk); say("Copia restaurada ✓ Recargando…"); setTimeout(() => location.reload(), 900); } catch (er) { say(permErr(er), 1); }
       }));
     } catch (er) { tbl.innerHTML = `<tbody><tr><td class="muted">${/does not exist|could not find|qa_backup/i.test(String(er.message)) ? "Falta ejecutar supabase-seguridad.sql en Supabase." : "No se pudieron cargar las copias: " + esc(er.message)}</td></tr></tbody>`; }
@@ -394,7 +397,7 @@
         try { await D.setRole(s.dataset.pe, s.value); say("Permiso actualizado ✓"); profCache.at = 0; renderPerms(); } catch (er) { say(permErr(er), 1); renderPerms(); }
       }));
       tbl.querySelectorAll("[data-pd]").forEach(b => (b.onclick = async () => {
-        if (!confirm(`¿Quitar el acceso a ${b.dataset.pd}? Ya no podrá ver el dashboard.`)) return;
+        if (!await ask(`¿Quitar el acceso a ${b.dataset.pd}? Ya no podrá ver el dashboard.`)) return;
         try { await D.removeUser(b.dataset.pd); say("Acceso quitado ✓"); profCache.at = 0; renderPerms(); } catch (er) { say(permErr(er), 1); }
       }));
     } catch (er) { tbl.innerHTML = `<tbody><tr><td class="muted">${esc(permErr(er))}</td></tr></tbody>`; }
@@ -412,8 +415,8 @@
     $("#mode").value = readOnly ? "read" : "edit";
     document.body.classList.toggle("ro", readOnly);
     $("#btnNew").hidden = readOnly; $("#btnImportXls").hidden = readOnly;
-    ["clients", "avisos", "tpl"].forEach(v => { $('#tabs [data-v="' + v + '"]').hidden = readOnly; });   // los lectores no ven Clientes, Avisos ni Plantillas
-    const cur = document.querySelector("#tabs button.on"); if (readOnly && cur && cur.hidden) setView("dash");
+    ["clients", "avisos", "tpl"].forEach(v => { $('#tabs [data-v="' + v + '"]').hidden = !isAdm(); });   // solo el administrador ve Clientes, Avisos y Plantillas
+    const cur = document.querySelector("#tabs button.on"); if (cur && cur.hidden) setView("dash");
     $("#actionbar").classList.toggle("ro", readOnly);
     document.querySelectorAll("[data-edit]").forEach(e => (e.hidden = readOnly));
   }
@@ -545,7 +548,7 @@
     $("#hoyBody").querySelectorAll("[data-open]").forEach(x => (x.onclick = () => openReq(x.dataset.open)));
     $("#hoyBody").querySelectorAll(".hrow[data-a] .hs").forEach(btn => (btn.onclick = () => {
       const rowEl = btn.closest(".hrow"), rid = rowEl.dataset.r, aid = rowEl.dataset.a;
-      const pct = +rowEl.querySelector(".hp").value, blocked = rowEl.querySelector(".hbk").checked, text = rowEl.querySelector(".hc").value.trim();
+      const pct = +rowEl.querySelector(".hp").value, blocked = rowEl.querySelector(".hbk").checked && +rowEl.querySelector(".hp").value < 100, text = rowEl.querySelector(".hc").value.trim();
       if (blocked && !text && !store.reqs.find(x => x.id === rid)?.acts.find(x => x.id === aid)?.blockReason) return say("Indica el motivo del bloqueo en el comentario.", 1);
       const wasBlocked0 = !!store.reqs.find(x => x.id === rid)?.acts.find(x => x.id === aid)?.blocked;
       const by = authorName(), at = new Date().toISOString(), cid = uid();
@@ -636,11 +639,13 @@
   // ---------- Equipo ----------
   let editMember = null;                               // integrante cuyo nombre se está editando
   function renderTeam() {
+    const canMod = isAdm();                              // agregar: editores; editar y eliminar: solo administradores
     $("#memberTbl").innerHTML = `<thead><tr><th>Nombre</th><th>Correo de Teams (para avisos)</th><th>Rol</th><th>Requerimientos activos</th><th></th></tr></thead><tbody>` +
-      store.members.map(m => `<tr><td>${editMember === m.id ? `<input data-mname="${m.id}" value="${esc(m.name)}" maxlength="80" aria-label="Nombre">` : esc(m.name)}</td><td>${readOnly ? esc(m.email) || '<span class="muted">Sin correo</span>' : `<input type="email" data-memail="${m.id}" value="${esc(m.email || "")}" placeholder="nombre@ips.gob.cl" aria-label="Correo de Teams de ${esc(m.name)}">`}</td><td>${pick(`data-mrole="${m.id}"`, m.roles, readOnly)}</td><td>${store.reqs.filter(r => ids(r).includes(m.id) && r.status !== "Completado").length}</td>
-        <td>${readOnly ? "" : editMember === m.id ? `<button data-msave="${m.id}" class="primary">Guardar</button> <button data-mcancel class="ghost">Cancelar</button>` : `<button data-medit="${m.id}" class="ghost">Editar</button> <button data-rm="${m.id}" class="danger">Quitar</button>`}</td></tr>`).join("") + `</tbody>`;
+      store.members.map(m => `<tr><td>${editMember === m.id ? `<input data-mname="${m.id}" value="${esc(m.name)}" maxlength="80" aria-label="Nombre">` : esc(m.name)}</td><td>${!canMod ? esc(m.email) || '<span class="muted">Sin correo</span>' : `<input type="email" data-memail="${m.id}" value="${esc(m.email || "")}" placeholder="nombre@ips.gob.cl" aria-label="Correo de Teams de ${esc(m.name)}">`}</td><td>${pick(`data-mrole="${m.id}"`, m.roles, !canMod)}</td><td>${store.reqs.filter(r => ids(r).includes(m.id) && r.status !== "Completado").length}</td>
+        <td>${!canMod ? "" : editMember === m.id ? `<button data-msave="${m.id}" class="primary">Guardar</button> <button data-mcancel class="ghost">Cancelar</button>` : `<button data-medit="${m.id}" class="ghost">Editar</button> <button data-rm="${m.id}" class="danger">Quitar</button>`}</td></tr>`).join("") + `</tbody>`;
     const mt = $("#memberTbl");
     mt.querySelectorAll("[data-medit]").forEach(b => (b.onclick = () => { editMember = b.dataset.medit; renderTeam(); mt.querySelector("[data-mname]")?.focus(); }));
+    mt.querySelectorAll("[data-mname]").forEach(i => filterInput(i, cleanStage));
     mt.querySelectorAll("[data-mcancel]").forEach(b => (b.onclick = () => { editMember = null; renderTeam(); }));
     const saveName = id => {
       const i = mt.querySelector(`[data-mname="${id}"]`), v = i.value.trim(), m = store.members.find(x => x.id === id);
@@ -658,15 +663,15 @@
     $("#memberTbl").querySelectorAll("[data-mrole]").forEach(cb => (cb.onchange = () => { const id = cb.dataset.mrole; store.members.find(m => m.id === id).roles = [...$("#memberTbl").querySelectorAll(`[data-mrole="${id}"]:checked`)].map(x => x.value); save(); render(); const d = document.querySelector(`[data-mrole="${id}"]`)?.closest("details"); if (d) d.open = true; }));
     { const keep = [...document.querySelectorAll("#memberRole input:checked")].map(x => x.value); $("#memberRole").innerHTML = pick('data-newrole', keep, readOnly).replace("Sin rol", "Roles…"); }
     $("#roleTbl").innerHTML = `<thead><tr><th>Rol</th><th>Integrantes</th><th></th></tr></thead><tbody>` + store.roles.map((r, i) =>
-      `<tr><td>${esc(r)}</td><td>${store.members.filter(m => m.roles.includes(r)).map(m => esc(m.name)).join(", ") || '<span class="muted">—</span>'}</td><td>${readOnly ? "" : `<button data-rrm="${i}" class="danger">Eliminar</button>`}</td></tr>`).join("") + `</tbody>`;
-    $("#roleTbl").querySelectorAll("[data-rrm]").forEach(b => (b.onclick = () => {
+      `<tr><td>${esc(r)}</td><td>${store.members.filter(m => m.roles.includes(r)).map(m => esc(m.name)).join(", ") || '<span class="muted">—</span>'}</td><td>${!canMod ? "" : `<button data-rrm="${i}" class="danger">Eliminar</button>`}</td></tr>`).join("") + `</tbody>`;
+    $("#roleTbl").querySelectorAll("[data-rrm]").forEach(b => (b.onclick = async () => {
       const r = store.roles[+b.dataset.rrm];
-      if (!confirm(`¿Eliminar el rol "${r}"? Sus integrantes quedarán sin rol.`)) return;
+      if (!await ask(`¿Eliminar el rol "${r}"? Sus integrantes quedarán sin rol.`)) return;
       store.roles.splice(+b.dataset.rrm, 1); store.members.forEach(m => { m.roles = m.roles.filter(x => x !== r); }); save(); render();
     }));
-    $("#memberTbl").querySelectorAll("[data-rm]").forEach(b => (b.onclick = () => {
+    $("#memberTbl").querySelectorAll("[data-rm]").forEach(b => (b.onclick = async () => {
       const m = store.members.find(x => x.id === b.dataset.rm);
-      if (!confirm(`¿Quitar a ${m.name}? Sus requerimientos quedarán sin responsable.`)) return;
+      if (!await ask(`¿Quitar a ${m.name}? Sus requerimientos quedarán sin responsable.`)) return;
       store.members = store.members.filter(x => x !== m);
       const drop = x => { if (ids(x).includes(m.id) || x.assigneeId === m.id) setIds(x, ids(x).filter(i => i !== m.id)); };
       store.reqs.forEach(r => { drop(r); r.acts.forEach(drop); });
@@ -677,14 +682,16 @@
   // ---------- Responsables de requerimiento (líderes) ----------
   let editLeader = null;                               // responsable cuyo nombre se está editando
   function renderLeaders() {
+    const canMod = isAdm();
     const t = $("#leaderTbl"), cnt = l => store.reqs.filter(r => leaderIds(r).includes(l.id) && r.status !== "Completado").length;
     t.innerHTML = `<thead><tr><th>Nombre</th><th>Correo</th><th>Roles</th><th>Requerimientos activos</th><th></th></tr></thead><tbody>` +
       (store.leaders.map(l => `<tr><td>${editLeader === l.id ? `<input data-lname="${l.id}" value="${esc(l.name)}" maxlength="80" aria-label="Nombre">` : `<b>${esc(l.name)}</b>`}</td>
-        <td>${readOnly ? (esc(l.email) || '<span class="muted">Sin correo</span>') : `<input type="email" data-lemail="${l.id}" value="${esc(l.email || "")}" placeholder="nombre@ips.gob.cl" aria-label="Correo de ${esc(l.name)}">`}</td>
-        <td>${lpick(`data-lrole="${l.id}"`, l.roles, readOnly)}</td><td>${cnt(l)}</td>
-        <td>${readOnly ? "" : editLeader === l.id ? `<button data-lsave="${l.id}" class="primary">Guardar</button> <button data-lcancel class="ghost">Cancelar</button>` : `<button data-ledit="${l.id}" class="ghost">Editar</button> <button data-lrm="${l.id}" class="danger">Quitar</button>`}</td></tr>`).join("")
+        <td>${!canMod ? (esc(l.email) || '<span class="muted">Sin correo</span>') : `<input type="email" data-lemail="${l.id}" value="${esc(l.email || "")}" placeholder="nombre@ips.gob.cl" aria-label="Correo de ${esc(l.name)}">`}</td>
+        <td>${lpick(`data-lrole="${l.id}"`, l.roles, !canMod)}</td><td>${cnt(l)}</td>
+        <td>${!canMod ? "" : editLeader === l.id ? `<button data-lsave="${l.id}" class="primary">Guardar</button> <button data-lcancel class="ghost">Cancelar</button>` : `<button data-ledit="${l.id}" class="ghost">Editar</button> <button data-lrm="${l.id}" class="danger">Quitar</button>`}</td></tr>`).join("")
         || `<tr><td colspan="5" class="muted" style="padding:16px">Aún no hay responsables de requerimiento. Agrégalos con el formulario de arriba.</td></tr>`) + `</tbody>`;
     t.querySelectorAll("[data-ledit]").forEach(b => (b.onclick = () => { editLeader = b.dataset.ledit; renderLeaders(); t.querySelector("[data-lname]")?.focus(); }));
+    t.querySelectorAll("[data-lname]").forEach(i => filterInput(i, cleanStage));
     t.querySelectorAll("[data-lcancel]").forEach(b => (b.onclick = () => { editLeader = null; renderLeaders(); }));
     const saveName = id => {
       const i = t.querySelector(`[data-lname="${id}"]`), v = i.value.trim(), l = store.leaders.find(x => x.id === id);
@@ -700,18 +707,18 @@
       fieldErr(i, ""); l.email = v; save(); say(v ? "Correo guardado ✓" : "Correo quitado.");
     }));
     t.querySelectorAll("[data-lrole]").forEach(cb => (cb.onchange = () => { const id = cb.dataset.lrole; store.leaders.find(l => l.id === id).roles = [...t.querySelectorAll(`[data-lrole="${id}"]:checked`)].map(x => x.value); save(); render(); const d = document.querySelector(`[data-lrole="${id}"]`)?.closest("details"); if (d) d.open = true; }));
-    t.querySelectorAll("[data-lrm]").forEach(b => (b.onclick = () => {
+    t.querySelectorAll("[data-lrm]").forEach(b => (b.onclick = async () => {
       const l = store.leaders.find(x => x.id === b.dataset.lrm), n = cnt(l);
-      if (!confirm(`¿Quitar a ${l.name}?${n ? ` Está asignado a ${n} requerimiento(s) activo(s); quedarán sin ese responsable.` : ""}`)) return;
+      if (!await ask(`¿Quitar a ${l.name}?${n ? ` Está asignado a ${n} requerimiento(s) activo(s); quedarán sin ese responsable.` : ""}`)) return;
       store.leaders = store.leaders.filter(x => x !== l); store.reqs.forEach(r => { r.leaderIds = (r.leaderIds || []).filter(i => i !== l.id); });
       save(); render();
     }));
     { const keep = [...document.querySelectorAll("#leaderRole input:checked")].map(x => x.value); $("#leaderRole").innerHTML = lpick("data-newlrole", keep, readOnly).replace("Sin rol", "Roles…"); }
     $("#leaderRoleTbl").innerHTML = `<thead><tr><th>Rol</th><th>Responsables</th><th></th></tr></thead><tbody>` + (store.leaderRoles.map((r, i) =>
-      `<tr><td><b>${esc(r)}</b></td><td>${store.leaders.filter(l => l.roles.includes(r)).map(l => `<span class="chip">${esc(l.name)}</span>`).join(" ") || '<span class="muted">—</span>'}</td><td>${readOnly ? "" : `<button data-lrr="${i}" class="danger">Eliminar</button>`}</td></tr>`).join("") || `<tr><td colspan="3" class="muted" style="padding:16px">Aún no hay roles. Crea el primero arriba.</td></tr>`) + `</tbody>`;
-    $("#leaderRoleTbl").querySelectorAll("[data-lrr]").forEach(b => (b.onclick = () => {
+      `<tr><td><b>${esc(r)}</b></td><td>${store.leaders.filter(l => l.roles.includes(r)).map(l => `<span class="chip">${esc(l.name)}</span>`).join(" ") || '<span class="muted">—</span>'}</td><td>${!canMod ? "" : `<button data-lrr="${i}" class="danger">Eliminar</button>`}</td></tr>`).join("") || `<tr><td colspan="3" class="muted" style="padding:16px">Aún no hay roles. Crea el primero arriba.</td></tr>`) + `</tbody>`;
+    $("#leaderRoleTbl").querySelectorAll("[data-lrr]").forEach(b => (b.onclick = async () => {
       const r = store.leaderRoles[+b.dataset.lrr];
-      if (!confirm(`¿Eliminar el rol "${r}"? Quienes lo tengan quedarán sin ese rol.`)) return;
+      if (!await ask(`¿Eliminar el rol "${r}"? Quienes lo tengan quedarán sin ese rol.`)) return;
       store.leaderRoles.splice(+b.dataset.lrr, 1); store.leaders.forEach(l => { l.roles = l.roles.filter(x => x !== r); }); save(); render();
     }));
   }
@@ -734,7 +741,7 @@
   const tplDays = t => (t.unit === "hh" ? Math.max(1, Math.ceil((+t.days || 1) / HH_DAY)) : Math.max(1, +t.days || 1));
   function tplTable(tbl, t) {
     tbl.innerHTML = `<thead><tr><th>#</th><th>Actividad</th><th>Duración <select data-allunit aria-label="Poner todas las actividades en la misma unidad"><option value="">Unidad de todas…</option><option value="d">Todas en días</option><option value="hh">Todas en HH</option></select></th><th></th></tr></thead><tbody>` +
-      t.map((x, i) => `<tr><td>${i + 1}</td><td><textarea class="grow" rows="1" data-i="${i}" data-f="name">${esc(x.name)}</textarea></td><td><div class="durw"><input type="number" min="1" data-i="${i}" data-f="days" value="${x.days}" aria-label="Duración"><select data-i="${i}" data-f="unit" aria-label="Unidad de la duración"><option value="d"${x.unit !== "hh" ? " selected" : ""}>Días</option><option value="hh"${x.unit === "hh" ? " selected" : ""}>HH</option></select></div>${x.unit === "hh" ? `<small class="muted">≈ ${tplDays(x)} día(s) · ${HH_DAY} HH = 1 día</small>` : ""}</td>
+      t.map((x, i) => `<tr><td>${i + 1}</td><td><textarea class="grow" rows="1" maxlength="500" data-i="${i}" data-f="name">${esc(x.name)}</textarea></td><td><div class="durw"><input type="number" min="1" data-i="${i}" data-f="days" value="${x.days}" aria-label="Duración"><select data-i="${i}" data-f="unit" aria-label="Unidad de la duración"><option value="d"${x.unit !== "hh" ? " selected" : ""}>Días</option><option value="hh"${x.unit === "hh" ? " selected" : ""}>HH</option></select></div>${x.unit === "hh" ? `<small class="muted">≈ ${tplDays(x)} día(s) · ${HH_DAY} HH = 1 día</small>` : ""}</td>
         <td><button data-up="${i}">↑</button> <button data-rm="${i}" class="danger">✕</button></td></tr>`).join("") + `</tbody>`;
     tbl.querySelectorAll("input,textarea,select[data-f]").forEach(i => { i.onchange = () => { t[+i.dataset.i][i.dataset.f] = i.dataset.f === "days" ? Math.max(1, +i.value) : i.value; save(); if (i.dataset.f === "unit" || i.dataset.f === "days") tplTable(tbl, t); }; i.disabled = readOnly; });
     const all = tbl.querySelector("[data-allunit]"); all.disabled = readOnly;
@@ -756,7 +763,7 @@
     (store.customTpl || []).forEach((c, n) => tplTable($("#tplTblC-" + n), c.acts));
     box.querySelectorAll(".tplName").forEach(i => (i.onchange = () => { const v = i.value.trim(); if (!v) { i.value = store.customTpl[+i.dataset.cn].name; return; } store.customTpl[+i.dataset.cn].name = v; save(); render(); }));
     box.querySelectorAll(".tplCAdd").forEach(b => (b.onclick = () => { store.customTpl[+b.dataset.n].acts.push({ name: "Nueva actividad", days: 1, unit: "d" }); save(); renderTpl(); }));
-    box.querySelectorAll(".tplCDel").forEach(b => (b.onclick = () => { const c = store.customTpl[+b.dataset.n], n = store.reqs.filter(r => r.type === c.id).length; if (n) return say(`No se puede eliminar "${c.name}": lo usan ${n} requerimiento(s). Cámbiales el tipo primero.`, 1); if (!confirm(`¿Eliminar el tipo "${c.name}"?`)) return; store.customTpl.splice(+b.dataset.n, 1); save(); renderTpl(); }));
+    box.querySelectorAll(".tplCDel").forEach(b => (b.onclick = async () => { const c = store.customTpl[+b.dataset.n], n = store.reqs.filter(r => r.type === c.id).length; if (n) return say(`No se puede eliminar "${c.name}": lo usan ${n} requerimiento(s). Cámbiales el tipo primero.`, 1); if (!await ask(`¿Eliminar el tipo "${c.name}"?`)) return; store.customTpl.splice(+b.dataset.n, 1); save(); renderTpl(); }));
     box.querySelectorAll("[data-edit]").forEach(b => (b.hidden = readOnly));
   }
   function renderTypeSel() {
@@ -823,7 +830,7 @@
   }
   function renderActs() {
     $("#actTbl").innerHTML = `<thead><tr><th>Actividad <span class="star">*</span></th><th>Resp. QA</th><th>Inicio <small class="opt">(opcional)</small></th><th>Fin <small class="opt">(opcional)</small></th><th>% Avance</th><th>Bloqueado <small class="opt">(opcional)</small></th><th></th></tr></thead><tbody>` +
-      draft.acts.map((a, i) => `<tr><td><textarea class="grow" rows="1" required data-i="${i}" data-f="name">${esc(a.name)}</textarea></td><td>${memberPick(`data-ai="${i}"`, ids(a), readOnly)}</td>
+      draft.acts.map((a, i) => `<tr><td><textarea class="grow" rows="1" required maxlength="500" data-i="${i}" data-f="name">${esc(a.name)}</textarea></td><td>${memberPick(`data-ai="${i}"`, ids(a), readOnly)}</td>
         <td><input type="date" data-i="${i}" data-f="start" value="${a.start}"></td><td><input type="date" data-i="${i}" data-f="end" value="${a.end}"></td>
         <td><select data-i="${i}" data-f="percent" title="% de avance de la actividad">${pctOpts(a.percent)}</select></td>
         <td><input type="checkbox" data-i="${i}" data-f="blocked"${a.blocked ? " checked" : ""}></td><td>${readOnly ? "" : `<button type="button" data-rm="${i}" class="danger">✕</button>`}</td></tr>`).join("") + `</tbody>`;
@@ -854,7 +861,11 @@
     const m = draft.metrics;
     $("#metBox").querySelectorAll("[data-m]").forEach(el => {
       el.value = m[el.dataset.m] ?? ""; el.disabled = readOnly;
-      el.oninput = () => { m[el.dataset.m] = el.type === "number" ? (el.value === "" ? "" : Math.max(0, +el.value)) : el.value.trim(); calcMet(); };
+      if (el.type === "number") el.onkeydown = e => { if (/^[eE+-.,]$/.test(e.key)) e.preventDefault(); };       // solo números enteros
+      el.oninput = () => {
+        if (el.type === "number" && el.value !== "") { const v = Math.min(10000, Math.max(0, Math.floor(+el.value))); if (String(v) !== el.value) el.value = v; }   // máximo 10000
+        m[el.dataset.m] = el.type === "number" ? (el.value === "" ? "" : +el.value) : el.value.trim(); calcMet();
+      };
     });
     calcMet();
   }
@@ -884,7 +895,7 @@
     T.innerHTML = all.length ? list.map(c => {
       const ed = editCm === c.id, hist = c.edits || [], mine = (!readOnly || D.remote) && myC(c);
       return `<div class="cm${c.src === "planner" ? " plc" : ""}"><small>${fdt(c.at)} · <b>${esc(c.by)}</b>${c.src === "planner" ? ' <span class="badge pl">Planner</span>' : ""}${hist.length ? ` · <i>editado ${fdt(c.editedAt || hist[hist.length - 1].at)}</i>` : ""}</small>` +
-        (ed ? `<textarea class="grow cmEdit" rows="2" maxlength="2000" aria-label="Editar comentario">${esc(c.text)}</textarea><div class="cmAct"><button type="button" class="primary" data-cmsave="${c.id}">Guardar</button><button type="button" class="ghost" data-cmcancel>Cancelar</button></div>` : `<p>${esc(c.text)}</p>`) +
+        (ed ? `<textarea class="grow cmEdit" rows="2" maxlength="5000" aria-label="Editar comentario">${esc(c.text)}</textarea><div class="cmAct"><button type="button" class="primary" data-cmsave="${c.id}">Guardar</button><button type="button" class="ghost" data-cmcancel>Cancelar</button></div>` : `<p>${esc(c.text)}</p>`) +
         (!ed && (mine || hist.length) ? `<div class="cmAct">${mine ? `<button type="button" class="ghost" data-cmedit="${c.id}" title="Editar mi comentario">✎ Editar</button>` : ""}${hist.length ? `<button type="button" class="ghost cmEye${histCm.has(c.id) ? " on" : ""}" data-cmhist="${c.id}" title="Ver historial (${hist.length} versión/es anterior/es)" aria-label="Ver historial del comentario">👁 <small>${hist.length}</small></button>` : ""}</div>` : "") +
         (histCm.has(c.id) && hist.length ? `<div class="cmHist"><b>Versiones anteriores</b>${[...hist].reverse().map(h => `<div class="cmh"><small>Reemplazado el ${fdt(h.at)}</small><p>${esc(h.text)}</p></div>`).join("")}</div>` : "") + "</div>";
     }).join("") + (all.length > THREAD_MAX ? `<button type="button" class="ghost" id="thrMore">${threadAll ? "Ver menos" : `Ver más (${all.length - THREAD_MAX} anteriores)`}</button>` : "")
@@ -913,9 +924,9 @@
       editCm = null; renderThread(); say("Comentario actualizado ✓ (la versión anterior quedó en el historial)");
     }));
   }
-  function addComment() {
+  async function addComment() {
     const text = $("#newComment").value.trim(); if (!text) return;
-    let by = lsGet("qa-author", ""); if (!by) { by = prompt("¿Con qué nombre quieres firmar tus comentarios?", "") || "Anónimo"; lsSet("qa-author", by); }
+    let by = lsGet("qa-author", ""); if (!by) { by = (await askText("¿Con qué nombre quieres firmar tus comentarios?", "", { title: "Firma de tus comentarios", placeholder: "Nombre y apellido" })) || "Anónimo"; lsSet("qa-author", by); }
     const cm = { id: uid(), at: new Date().toISOString(), by, byEmail: boot.user || "", text }; draft.comments.push(cm);
     if (readOnly) {                                    // lector: solo puede comentar, mediante una función del servidor
       if (isNew) return;
@@ -941,14 +952,23 @@
     if (String(draft.code || "").trim() && (isNew || draft.code !== was?.code) && !CODE_RE.test(draft.code)) mark(form.code, "El código debe ser 1 letra seguida de hasta 8 números, sin símbolos (ejemplo: R1903)");
     if (String(draft.title || "").trim() && (isNew || draft.title !== was?.title) && !TITLE_RE.test(draft.title)) mark(form.title, "El título solo admite letras, números, espacios y estos signos: ( ) # $ / -");
     if (String(draft.bucket || "").trim() && (isNew || draft.bucket !== was?.bucket) && !STAGE_RE.test(draft.bucket)) mark(form.bucket, "La etapa del proyecto solo admite letras y espacios (sin números, símbolos ni caracteres especiales)");
-    const wiUrl = form.querySelector('[data-m="wiUrl"]'); if (wiUrl && !wiUrl.checkValidity()) mark(wiUrl, "El enlace al work item debe comenzar con https://");
+    const HTTP_RE = /^https?:///i;
+    const wiUrl = form.querySelector('[data-m="wiUrl"]'); if (wiUrl && (!wiUrl.checkValidity() || (wiUrl.value.trim() && !HTTP_RE.test(wiUrl.value.trim())))) mark(wiUrl, "El enlace al work item debe comenzar con https://");
+    form.querySelectorAll('[data-df="url"]').forEach((el, i) => { if (el.value.trim() && (!el.checkValidity() || !HTTP_RE.test(el.value.trim()))) mark(el, `Entregable ${i + 1}: el enlace debe comenzar con https://`); });
+    { const mv = k => { const el = form.querySelector(`[data-m="${k}"]`); return el && el.value !== "" ? +el.value : null; }, dsg = mv("designed"), exe = mv("executed"), pas = mv("passed"), fal = mv("failed"), aut = mv("automated");
+      const q = k => form.querySelector(`[data-m="${k}"]`);
+      if (dsg != null && exe != null && exe > dsg) mark(q("executed"), "Casos ejecutados no puede ser mayor que los diseñados");
+      if (exe != null && (pas || 0) + (fal || 0) > exe) mark(q("passed"), "Aprobados + fallidos no puede superar los casos ejecutados");
+      if (dsg != null && aut != null && aut > dsg) mark(q("automated"), "Automatizados no puede ser mayor que los casos diseñados"); }
     if (!draft.acts.length) { mark($("#btnActAdd"), "Agrega al menos una actividad"); mark($("#actTbl"), ""); }
     // fechas opcionales: si se dejan vacías se completan con la actividad anterior (inicio) o con el inicio (fin)
     draft.acts.forEach((a, i) => {
       if (!a.start) a.start = i ? addDays(draft.acts[i - 1].end || draft.acts[i - 1].start, 1) : (draft.start || today);
       if (!a.end) a.end = a.start;
+      if (a.percent >= 100) { a.blocked = false; a.blockReason = ""; a.blockedSince = ""; }   // una actividad terminada no queda bloqueada
       const row = $("#actTbl").querySelector(`tbody tr:nth-child(${i + 1})`);
       if (!String(a.name || "").trim()) mark(row?.querySelector('[data-f="name"]'), `Actividad ${i + 1}: el nombre es obligatorio`);
+      if (String(a.name || "").length > 500) mark(row?.querySelector('[data-f="name"]'), `Actividad ${i + 1}: el nombre no puede superar los 500 caracteres`);
       if (a.end < a.start) { mark(row?.querySelector('[data-f="end"]'), `Actividad ${i + 1}: la fecha de fin es anterior al inicio`); mark(row?.querySelector('[data-f="start"]'), ""); }
     });
     if (bad.length) { form.querySelector(".bad")?.scrollIntoView({ block: "center" }); return say("Revisa los campos marcados en rojo: " + [...new Set(bad.filter(Boolean))].join("; ") + ".", 1); }
@@ -981,11 +1001,12 @@
     const box = $("#clientTbl");
     box.innerHTML = store.clients.map(c => (PL ? PL.cardHtml(c, readOnly) : `<div class="ccard"><div class="chead"><input data-cn="${c.id}" value="${esc(c.name)}"${readOnly ? " disabled" : ""}><span class="muted">${store.reqs.filter(r => r.clientId === c.id).length} requerimiento(s)</span>${readOnly ? "" : `<button data-cdel="${c.id}" class="danger">Eliminar cliente</button>`}</div></div>`)).join("");
     if (PL) PL.bind(box);
+    box.querySelectorAll("[data-cn]").forEach(i => filterInput(i, cleanStage));
     box.querySelectorAll("[data-cn]").forEach(i => (i.onchange = () => { const v = i.value.trim(); if (!v) { i.value = clientName(i.dataset.cn); return; } commit(s => { const c = s.clients.find(x => x.id === i.dataset.cn); if (c) c.name = v; }); renderClientSel(); }));
-    box.querySelectorAll("[data-cdel]").forEach(b => (b.onclick = () => {
+    box.querySelectorAll("[data-cdel]").forEach(b => (b.onclick = async () => {
       const c = store.clients.find(x => x.id === b.dataset.cdel);
       if (store.reqs.some(r => r.clientId === c.id)) return say(`No se puede eliminar "${c.name}": tiene requerimientos. Elimínalos o muévelos a otro cliente primero.`, 1);
-      if (!confirm(`¿Eliminar el cliente "${c.name}"?`)) return;
+      if (!await ask(`¿Eliminar el cliente "${c.name}"?`)) return;
       store.clients = store.clients.filter(x => x !== c); save(); render();
     }));
   }
@@ -994,8 +1015,10 @@
     if (!PL) { box.innerHTML = '<div class="card"><p class="muted">Módulo de avisos no disponible.</p></div>'; return; }
     box.innerHTML = PL.avisosHtml(readOnly); PL.avisosBind(box, readOnly);
   }
+  const FILTERS = ["fType", "fRole", "fAssignee", "fPrio", "fBucket", "fStatus"];
+  const syncClear = () => { $("#btnClearFilters").disabled = !(FILTERS.some(i => $("#" + i).value) || $("#fText").value.trim()); };   // activo solo si hay algún filtro
   function render() {
-    renderTypeFilter();
+    renderTypeFilter(); syncClear();
     if (PL) $("#btnSync").hidden = !PL.anyEnabled();
     if (!$("#v-dash").hidden) renderDash();
     if (!$("#v-hoy").hidden) renderHoy();
@@ -1186,11 +1209,10 @@
     a.download = `carta-gantt-qa-${today}.xls`; a.click(); say("Gantt exportado ✓");
   }
   async function exportGanttPdf() {
-    const w = window.open("", "_blank"); if (!w) return say("El navegador bloqueó la ventana. Permite ventanas emergentes para este sitio.", 1);   // se abre antes del selector para que no la bloquee
-    w.document.write("<p style=\"font:14px sans-serif;padding:20px\">Preparando la carta Gantt…</p>");
-    const list = await pickReqs({ title: "Exportar Gantt (PDF)", ok: "Exportar PDF", hint: "Elige los requerimientos que quieres incluir en la carta Gantt." }); if (!list) { w.close(); return; }
-    const t = ganttHtml(true, list); if (!t) { w.close(); return say("No hay requerimientos para exportar.", 1); }
-    w.document.open(); w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Carta Gantt QA ${today}</title><style>@page{size:A3 landscape;margin:10mm}body{margin:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}table td{padding:2px 4px;white-space:nowrap}</style></head><body>${t}<script>onload=()=>setTimeout(()=>print(),300)<\/script></body></html>`);
+    const list = await pickReqs({ title: "Exportar Gantt (PDF)", ok: "Exportar PDF", hint: "Elige los requerimientos que quieres incluir en la carta Gantt." }); if (!list) return;
+    const t = ganttHtml(true, list); if (!t) return say("No hay requerimientos para exportar.", 1);
+    const w = window.open("", "_blank"); if (!w) return say("El navegador bloqueó la ventana del PDF. Permite ventanas emergentes para este sitio y vuelve a intentarlo.", 1);
+    w.document.open(); w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Carta Gantt QA ${today}</title><style>@page{size:A3 landscape;margin:10mm}body{margin:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}table td{padding:2px 4px;white-space:nowrap}</style></head><body>${t}<script>onload=()=>setTimeout(()=>print(),300)</script></body></html>`);
     w.document.close();
   }
 
@@ -1221,8 +1243,11 @@
   $("#hoyMine").onchange = renderHoy;
   $("#btnGanttXls").onclick = exportGanttXls;
   $("#btnGanttPdf").onclick = exportGanttPdf;
-  ["fType", "fRole", "fAssignee", "fStatus"].forEach(i => ($("#" + i).onchange = render)); $("#fText").oninput = render;
+  FILTERS.forEach(i => ($("#" + i).onchange = render)); $("#fText").oninput = render;   // (prioridad y etapa antes no refrescaban la tabla al cambiar)
+  $("#actionbar").addEventListener("change", syncClear);
+  $("#btnClearFilters").onclick = () => { FILTERS.forEach(i => ($("#" + i).value = "")); $("#fText").value = ""; render(); say("Filtros borrados ✓"); };
   document.querySelectorAll("#zoom button").forEach(b => (b.onclick = () => { pxDay = +b.dataset.z; lsSet("qa-zoom", pxDay); renderGantt(); }));
+  [$("#memberForm").name, $("#leaderForm").name, $("#roleForm").role, $("#leaderRoleForm").role, $("#clientForm").name].forEach(el => filterInput(el, cleanStage));   // solo letras y espacios
   $("#memberForm").onsubmit = e => { e.preventDefault(); if (readOnly) return; const f = e.target; fieldErr(f.name, ""); fieldErr(f.email, "");
     if (!f.name.value.trim()) return fieldErr(f.name, "Escribe el nombre de la persona.");
     if (f.email.value.trim() && !EMAIL_RE.test(f.email.value.trim())) return fieldErr(f.email, "El correo no tiene un formato válido (ejemplo: nombre@ips.gob.cl).");
@@ -1249,21 +1274,21 @@
   $("#clientSel").onchange = e => { clientId = e.target.value; lsSet("qa-client", clientId); render(); };
   $("#clientForm").onsubmit = e => { e.preventDefault(); if (readOnly) return; const v = e.target.name.value.trim(); if (!v) return; if (store.clients.some(c => c.name.toLowerCase() === v.toLowerCase())) return say("Ese cliente ya existe.", 1); const c = { id: uid(), name: v }; store.clients.push(c); e.target.reset(); save(); clientId = c.id; lsSet("qa-client", clientId); render(); say("Cliente creado y seleccionado ✓"); };
   document.querySelectorAll(".tplAdd").forEach(b => (b.onclick = () => { store.templates[b.dataset.k].push({ name: "Nueva actividad", days: 1, unit: "d" }); save(); renderTpl(); }));
-  document.querySelectorAll(".tplReset").forEach(b => (b.onclick = () => { if (confirm("¿Restaurar esta plantilla por defecto?")) { store.templates[b.dataset.k] = D.defaultTemplates()[b.dataset.k]; save(); renderTpl(); } }));
-  $("#rform").type.onchange = () => {
+  document.querySelectorAll(".tplReset").forEach(b => (b.onclick = async () => { if (await ask("¿Restaurar esta plantilla por defecto?")) { store.templates[b.dataset.k] = D.defaultTemplates()[b.dataset.k]; save(); renderTpl(); } }));
+  $("#rform").type.onchange = async () => {
     const prev = draft.type; readForm(); syncType();
     if (draft.type === prev) return;
     const label = "QA " + typeName(draft.type);
     const prevNames = JSON.stringify(tplFor(prev).map(t => t.name)), untouched = JSON.stringify(draft.acts.map(t => t.name)) === prevNames;
-    if (!draft.acts.length || untouched || confirm(`Cambiar a ${label} reemplaza las actividades actuales por las de su plantilla. ¿Continuar?`)) { draft.acts = fromTemplate(draft.acts[0]?.start || today); renderActs(); }
+    if (!draft.acts.length || untouched || await ask(`Cambiar a ${label} reemplaza las actividades actuales por las de su plantilla. ¿Continuar?`)) { draft.acts = fromTemplate(draft.acts[0]?.start || today); renderActs(); }
     else { draft.type = prev; $("#rform").type.value = prev; syncType(); }
   };
   $("#hoyExpand").onclick = () => setHoyAll(false); $("#hoyCollapse").onclick = () => setHoyAll(true);
   $("#btnActAdd").onclick = () => { const last = draft.acts[draft.acts.length - 1]; const s = last ? addDays(last.end, 1) : today; draft.acts.push({ id: uid(), name: "Nueva actividad", start: s, end: s, percent: 0, assigneeId: draft.assigneeId, assigneeIds: [...ids(draft)], blocked: false }); renderActs(); };
   $("#btnDelAdd").onclick = () => { draft.deliverables.push({ id: uid(), name: "Nuevo entregable", due: span(draft)[1] || today, state: "pendiente", url: "" }); renderDel(); };
-  $("#btnTplNew").onclick = () => {
+  $("#btnTplNew").onclick = async () => {
     if (readOnly) return;
-    const name = (prompt("Nombre del nuevo tipo de requerimiento (ej: QA Performance, Regresión):", "") || "").trim(); if (!name) return;
+    const name = ((await askText("Nombre del nuevo tipo de requerimiento (ej: QA Performance, Regresión):", "", { title: "Nuevo tipo" })) || "").trim(); if (!name) return;
     if ((store.customTpl ||= []).some(c => c.name.toLowerCase() === name.toLowerCase())) return say("Ya existe un tipo con ese nombre.", 1);
     store.customTpl.push({ id: uid(), name, acts: [{ name: "Nueva actividad", days: 1, unit: "d" }] }); save(); renderTpl(); render(); say("Tipo creado ✓ (ya está disponible en el campo Tipo)");
   };
@@ -1271,10 +1296,10 @@
   $("#rform").onsubmit = submitReq;
   // campos inválidos (p. ej. Código/Título vacío, enlace mal escrito) bloquean el envío sin avisar si quedan fuera de vista
   ["input", "change"].forEach(t => $("#rform").addEventListener(t, ev => ev.target.classList?.remove("bad")));
-  $("#rform").addEventListener("invalid", ev => { ev.target.classList.add("bad"); const l =ev.target.closest("label"); say(`Campo inválido: ${(l ? l.childNodes[0].textContent : ev.target.name || "").trim().replace(/\s*\*$/, "")} — ${ev.target.validationMessage}`, 1); }, true);
-  $("#rCancel").onclick = $("#rClose").onclick = () => { if (dirtyReq() && !confirm("Tienes cambios sin guardar. ¿Descartarlos?")) return; $("#dlg").close(); };
-  $("#dlg").addEventListener("cancel", e => { if (dirtyReq() && !confirm("Tienes cambios sin guardar. ¿Descartarlos?")) e.preventDefault(); });   // tecla Escape
-  $("#rDelete").onclick = () => { if (confirm("¿Eliminar este requerimiento y su seguimiento?")) { store.reqs = store.reqs.filter(r => r.id !== draft.id); save(); $("#dlg").close(); render(); } };
+  $("#rform").addEventListener("invalid", ev => { ev.target.classList.add("bad"); const l =ev.target.closest("label"); say(`Campo inválido: ${(l ? (l.querySelector(":scope > .lcap")?.firstChild || l.childNodes[0]).textContent : ev.target.name || "").trim().replace(/\s*\*$/, "")} — ${ev.target.validationMessage}`, 1); }, true);
+  $("#rCancel").onclick = $("#rClose").onclick = async () => { if (dirtyReq() && !await ask("Tienes cambios sin guardar. ¿Descartarlos?")) return; $("#dlg").close(); };
+  $("#dlg").addEventListener("cancel", async e => { e.preventDefault(); if (!dirtyReq() || await ask("Tienes cambios sin guardar. ¿Descartarlos?", { title: "Cambios sin guardar", ok: "Descartar", danger: true })) $("#dlg").close(); });   // tecla Escape
+  $("#rDelete").onclick = async () => { if (await ask("¿Eliminar este requerimiento y su seguimiento?")) { store.reqs = store.reqs.filter(r => r.id !== draft.id); save(); $("#dlg").close(); render(); } };
 
   $("#btnLogout").onclick = D.logout;
   const paintTheme = () => {

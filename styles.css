@@ -665,3 +665,37 @@ html[data-theme] header.top .umenu b,html[data-theme] header.top .umenu #uname2,
 html[data-theme] header.top .umenu small{color:var(--mut)}
 html[data-theme] header.top .umenu .uitem{color:var(--s-atr)}
 html[data-theme] header.top .umenu .uitem.uprofile{color:var(--ink)}
+
+/* ventanas de confirmación centradas (dialogs.js) */
+.askdlg{border:1px solid var(--line);border-radius:16px;background:var(--card);color:var(--ink);padding:0;width:min(440px,92vw);box-shadow:0 24px 60px rgba(0,0,0,.5);margin:auto}
+.askdlg::backdrop{background:rgba(0,0,0,.55);backdrop-filter:blur(2px)}
+.askf{padding:22px 24px 18px;display:grid;gap:12px}
+.askT{margin:0;font-size:18px}
+.askM{margin:0;white-space:pre-line;line-height:1.45;color:var(--ink)}
+.askI{width:100%}
+.askErr{color:var(--s-atr);font-size:13px}
+.askB{display:flex;justify-content:flex-end;gap:10px;margin-top:6px}
+.askdlg.shake{animation:askshake .3s}
+@keyframes askshake{20%,60%{transform:translateX(-7px)}40%,80%{transform:translateX(7px)}}
+
+/* mientras se comprueba la sesión no se muestra el dashboard (evita el parpadeo antes de volver al inicio de sesión) */
+body.booting header.top,body.booting #actionbar,body.booting #app{display:none!important}
+body.booting::before{content:"Cargando…";position:fixed;inset:0;display:grid;place-items:center;font:600 15px system-ui,sans-serif;color:var(--mut,#667);background:var(--bg,#fff);z-index:9999}
+
+/* encabezado en dos filas: marca, cliente, tema y usuario arriba; navegación completa debajo */
+@media(min-width:761px){
+  header.top{row-gap:6px;padding-bottom:6px}
+  header.top .tabs{order:5;flex:1 1 100%;margin:2px 0 0;padding:6px 0 0;gap:2px;flex-wrap:wrap;border-top:1px solid color-mix(in srgb,var(--hmut,var(--mut)) 28%,transparent)}
+  header.top .tabs button{padding:8px 14px;font-weight:600}
+}
+/* Dashboard: botón de borrar filtros */
+#btnClearFilters{white-space:nowrap}
+#btnClearFilters:disabled{opacity:.45;cursor:not-allowed}
+/* Carta Gantt: descripción arriba; zoom y exportaciones agrupados a la derecha, debajo */
+#v-gantt .gtoolbar{flex-wrap:wrap;gap:12px 16px;align-items:center}
+#v-gantt .gdesc{flex:1 1 100%;max-width:none}
+#v-gantt .gtools{margin-left:auto;display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+
+/* ícono de ayuda junto al nombre del campo (formularios) y globo sobre las ventanas modales */
+.lcap{display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap}
+.tipbox[popover]{inset:auto;margin:0;overflow:visible;color:#e5e7eb}
