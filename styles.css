@@ -18,7 +18,7 @@ button.danger{color:var(--s-atr-ink)}
 .toolbar{display:flex;gap:8px;padding:14px 20px;flex-wrap:wrap;align-items:center}
 .seg{display:flex}.seg button{border-radius:0}.seg button:first-child{border-radius:6px 0 0 6px}.seg button:last-child{border-radius:0 6px 6px 0}
 .seg button.on{background:var(--acc);color:#fff;border-color:var(--acc)}
-.gantt{margin:0 20px 20px;background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:auto;max-height:calc(100vh - 260px);position:relative}
+.gantt{margin:0 20px 20px;background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:auto;max-height:calc(100vh - 260px);max-height:calc(100dvh - 260px);position:relative}
 .g-inner{position:relative;min-width:100%}
 .g-head{position:sticky;top:0;z-index:5;background:var(--card);border-bottom:1px solid var(--line)}
 .g-row{display:flex;height:34px;border-bottom:1px solid var(--line)}
@@ -275,7 +275,7 @@ dialog{width:min(1240px,97vw)}
   .toolbar .spacer{display:none}.toolbar .seg{width:100%}.toolbar .seg button{flex:1}
   .toolbar .muted{width:100%;font-size:12px}
   .toolbar .ghost{flex:1 1 150px;justify-content:center}
-  .gantt{margin:0 12px 12px;max-height:calc(100vh - 220px)}
+  .gantt{margin:0 12px 12px;max-height:calc(100vh - 220px);max-height:calc(100dvh - 220px)}
   .g-label{padding:7px 8px;font-size:12px}.g-label small{display:none}
   .card{margin:12px;padding:12px}
   .card table{display:block;overflow-x:auto;white-space:nowrap}
@@ -744,3 +744,9 @@ th{font-size:13px}
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}
 }
+
+/* ---- P3: gestos, zona de toque y limpieza ---- */
+.gantt,.rgrid,.thread,.pbody,.tablewrap,#pickList,.rpmenu,.tmenu,.umenu{overscroll-behavior:contain}   /* el scroll interno no arrastra la página */
+button,select,input,summary,label,a,.qhint{touch-action:manipulation}                                  /* sin retraso de doble toque en móvil */
+.qhint::after{content:"";position:absolute;inset:-6px}                                                  /* zona de toque de 27 px sin cambiar el tamaño visible */
+.tablewrap.flush{margin:0}

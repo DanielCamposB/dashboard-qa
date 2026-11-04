@@ -1325,8 +1325,10 @@
   $("#rDelete").onclick = async () => { if (await ask("¿Eliminar este requerimiento y su seguimiento?")) { store.reqs = store.reqs.filter(r => r.id !== draft.id); save(); $("#dlg").close(); render(); } };
 
   $("#btnLogout").onclick = D.logout;
+  document.querySelectorAll("#themes .tmenu button").forEach(b => { const s = b.querySelector(".tsw"); if (s) s.style.background = b.dataset.bg; });   // un solo origen del color de cada muestra
   const paintTheme = () => {
     const t = document.documentElement.dataset.theme;
+    requestAnimationFrame(() => { const hd = document.querySelector("header.top"), m = document.querySelector('meta[name="theme-color"]'); if (hd && m && hd.offsetParent !== null) m.content = getComputedStyle(hd).backgroundColor; });   // barra del navegador del color del tema
     document.querySelectorAll("#themes .tmenu button").forEach(b => { const on = b.dataset.t === t; b.classList.toggle("on", on); b.setAttribute("aria-pressed", on); if (on) { $("#tnameCur").textContent = b.dataset.n; $("#tswCur").style.background = b.dataset.bg; } });
   };
   document.querySelectorAll("#themes .tmenu button").forEach(b => (b.onclick = () => { document.documentElement.dataset.theme = b.dataset.t; lsSet("qa-theme", b.dataset.t); paintTheme(); $("#themes").open = false; }));

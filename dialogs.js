@@ -27,6 +27,8 @@
       dlg.showModal(); (o.input ? inp : yes).focus();
     });
   }
+  // las ventanas de formulario sin envío real (importar, elegir, motivo): Enter no las cierra
+  ["imdlg", "pickdlg", "rsdlg"].forEach(id => { const f = document.querySelector("#" + id + " form"); if (f) f.addEventListener("submit", e => e.preventDefault()); });
   window.QA_UI = {
     ask: (msg, o = {}) => open({ msg, ...o }),
     askText: (msg, def = "", o = {}) => open({ msg, def, input: true, ...o }),
