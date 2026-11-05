@@ -750,3 +750,8 @@ th{font-size:13px}
 button,select,input,summary,label,a,.qhint{touch-action:manipulation}                                  /* sin retraso de doble toque en móvil */
 .qhint::after{content:"";position:absolute;inset:-6px}                                                  /* zona de toque de 27 px sin cambiar el tamaño visible */
 .tablewrap.flush{margin:0}
+
+/* Carta Gantt: la barra resumen del requerimiento toma el color de su estado (Bloqueado = amarillo, igual que el resto de estados) */
+.bar.sum{top:9px!important;height:12px!important;opacity:.9}
+.bar.st-Bloqueado{background:#e0a400;color:#1a1200}
+.bar.st-Bloqueado .fill{background:rgba(0,0,0,.22)}

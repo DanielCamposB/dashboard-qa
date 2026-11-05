@@ -604,7 +604,7 @@
       const [s, e] = span(r), p = progress(r), st = "st-" + (late(r) && r.status !== "Bloqueado" ? "Atrasado" : r.status.replace(" ", ""));
       const exp = !r.acts.length;
       h += `<div class="g-row grp"><div class="g-label" data-open="${r.id}">${esc(r.code)} · ${esc(r.title)}<small>${r.type !== "trad" ? esc(typeName(r.type)) + " · " : ""}${esc(mnames(r))} · ${p}%</small></div>
-        <div class="g-track" style="width:${W}px">${r.committedEnd && r.committedEnd !== e ? `<i class="cmark" style="left:${x(d2n(r.committedEnd) + 1)}px" title="Fecha comprometida ${fd(r.committedEnd)}"></i>` : ""}${exp ? bar("req", r.id, r, st, r.code, p, true) : bar("sum", r.id, { start: s, end: e }, "st-sum", "", p, false)}</div></div>`;
+        <div class="g-track" style="width:${W}px">${r.committedEnd && r.committedEnd !== e ? `<i class="cmark" style="left:${x(d2n(r.committedEnd) + 1)}px" title="Fecha comprometida ${fd(r.committedEnd)}"></i>` : ""}${exp ? bar("req", r.id, r, st, r.code, p, true) : bar("sum", r.id, { start: s, end: e }, st + " sum", "", p, false)}</div></div>`;
       if (!exp) for (const a of r.acts) {
         const ast = a.blocked ? "st-Bloqueado" : a.percent >= 100 ? "st-Completado" : a.end < today ? "st-Atrasado" : a.percent > 0 ? "st-Encurso" : "st-Pendiente";
         h += `<div class="g-row"><div class="g-label" data-open="${r.id}">&nbsp;&nbsp;${esc(a.name)}<small>${esc(mnames(a, r))}</small></div><div class="g-track" style="width:${W}px">${bar("act", r.id + "|" + a.id, a, ast, a.percent + "%", a.percent, true)}</div></div>`;
@@ -1189,8 +1189,8 @@
     if (weekly) min -= (new Date(min * DAY).getUTCDay() + 6) % 7;            // lunes
     const step = weekly ? 7 : 1, cols = [];
     for (let n = min; n <= max; n += step) cols.push(n);
-    const COL = { Completado: "#2e9e6a", "En curso": "#2f6fed", Bloqueado: "#e0861b", Atrasado: "#d6394a", Pendiente: "#9aa3b5" };
-    const tint = c => c + "55";
+    const COL = { Completado: "#2e9e6a", "En curso": "#2f6fed", Bloqueado: "#e0a400", Atrasado: "#d6394a", Pendiente: "#9aa3b5" };
+    const tint = c => "#" + [1, 3, 5].map(i => Math.round(parseInt(c.slice(i, i + 2), 16) * 0.4 + 255 * 0.6).toString(16).padStart(2, "0")).join("");   // tono claro sólido: Excel ignora los colores con transparencia (#rrggbbaa)
     const actSt = a => a.blocked ? "Bloqueado" : a.percent >= 100 ? "Completado" : a.end < today ? "Atrasado" : a.percent > 0 ? "En curso" : "Pendiente";
     const reqSt = r => (late(r) && r.status !== "Bloqueado" && r.status !== "Completado") ? "Atrasado" : r.status;
     const months = [];
@@ -1209,11 +1209,11 @@
       <tr><td colspan="${9 + cols.length}" style="border:0;color:#555">Generada el ${today} · Vista ${weekly ? "semanal" : "diaria"} · Avance: tono fuerte = completado, tono claro = pendiente · Línea roja = hoy</td></tr>
       <tr>${["Cliente", "Requerimiento", "Actividad", "Responsable", "Inicio", "Fin", "Avance", "Estado", "Tipo"].map(x => `<td rowspan="2" style="${th}">${x}</td>`).join("")}${months.map(m => `<td colspan="${m.n}" style="${th}">${esc(m.k)}</td>`).join("")}</tr>
       <tr>${cols.map(n => { const d = new Date(n * DAY); return `<td style="${th}font-size:${weekly ? 7 : 8}pt">${weekly ? d.getUTCDate() + "/" + (d.getUTCMonth() + 1) : d.getUTCDate()}</td>`; }).join("")}</tr>`;
-    const row = (cl, req, act, who, s, e, pct, st, tipo, bold) => `<tr style="${bold ? "font-weight:bold;background:#eef2fb;" : ""}"><td>${esc(cl)}</td><td>${esc(req)}</td><td>${esc(act)}</td><td>${esc(who)}</td><td>${esc(s)}</td><td>${esc(e)}</td><td style="text-align:center">${esc(pct)}%</td><td style="color:${COL[st]};font-weight:bold">${esc(st)}</td><td>${esc(tipo)}</td>${cols.map(n => cell(n, d2n(s), d2n(e), pct, COL[st])).join("")}</tr>`;
+    const row = (cl, req, act, who, s, e, pct, st, tipo, bold) => `<tr style="${bold ? "font-weight:bold;background:#eef2fb;" : ""}"><td>${esc(cl)}</td><td>${esc(req)}</td><td>${esc(act)}</td><td>${esc(who)}</td><td style="white-space:nowrap">${esc(fd(s))}</td><td style="white-space:nowrap">${esc(fd(e))}</td><td style="text-align:center">${esc(pct)}%</td><td style="color:${COL[st]};font-weight:bold">${esc(st)}</td><td>${esc(tipo)}</td>${cols.map(n => cell(n, d2n(s), d2n(e), pct, COL[st])).join("")}</tr>`;
     for (const r of list) {
       const [s, e] = span(r), p = progress(r), rs = reqSt(r), cn = clientName(r.clientId), nm = `${r.code} · ${r.title}`;
-      t += row(cn, nm, r.acts.length ? "(resumen)" : "—", mnames(r), fd(s), fd(e), p, rs, typeName(r.type), true);
-      r.acts.forEach(a => (t += row("", "", a.name, mnames(a, r), fd(a.start), fd(a.end), a.percent, actSt(a), "", false)));
+      t += row(cn, nm, r.acts.length ? "(resumen)" : "—", mnames(r), s, e, p, rs, typeName(r.type), true);
+      r.acts.forEach(a => (t += row("", "", a.name, mnames(a, r), a.start, a.end, a.percent, actSt(a), "", false)));
     }
     return t + "</table>";
   }
