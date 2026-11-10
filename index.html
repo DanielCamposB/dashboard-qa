@@ -15,8 +15,8 @@
 </head>
 <body class="booting">
 <header class="top">
-  <div class="brandbar"><img src="logo-sonda.png" alt="Sonda" class="logo"><h1>Dashboard QA</h1></div>
-  <label class="clientLbl">Cliente <select id="clientSel" aria-label="Cliente activo"></select></label>
+  <div class="brandbar"><h1>Dashboard QA</h1></div>
+  <label class="clientLbl"><span id="clientLblTxt">Clientes/Departamentos</span> <select id="clientSel" aria-label="Cliente o departamento activo"></select></label>
   <nav class="tabs" id="tabs" aria-label="Secciones">
     <button data-v="dash" class="on" aria-current="page">Dashboard</button>
     <button data-v="hoy">Hoy</button>
@@ -147,7 +147,7 @@
 
 <section id="v-gantt" class="view" hidden>
   <div class="toolbar gtoolbar">
-    <span class="muted gdesc">Muestra los requerimientos que dejes filtrados en la solapa Dashboard: cualquier filtro que apliques allá (tipo, rol, equipo, estado, prioridad, etapa o texto) se refleja aquí. Arrastra una barra para mover fechas (modo Editor).</span>
+    <span class="muted gdesc">Muestra los requerimientos que dejes filtrados en la solapa Dashboard: cualquier filtro que apliques allá (tipo, rol, equipo, estado, prioridad, etapa o texto) se refleja aquí. Pasa el mouse por una barra para ver su detalle y haz clic para editar sus fechas.</span>
     <div class="gtools">
       <div class="seg" id="zoom"><button data-z="32">Día</button><button data-z="14" class="on">Semana</button><button data-z="5">Mes</button></div>
       <button id="btnGanttXls" class="ghost"><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v12M7 11l5 5 5-5M4 20h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Exportar Gantt (Excel)</button>
@@ -224,7 +224,12 @@
 
 <section id="v-clients" class="view" hidden>
   <div class="card">
-    <h2>Clientes</h2>
+    <h2 id="clientsTitle">Clientes/Departamentos</h2>
+    <form id="clientLabelForm" class="inline" novalidate>
+      <label class="lbl">Nombre de esta sección <small class="muted">(se ve en el selector de arriba y en la pestaña; cámbialo a «Clientes», «Departamentos», etc.)</small>
+        <input name="label" id="clientLabelIn" maxlength="40" autocomplete="off" placeholder="Clientes/Departamentos" aria-label="Nombre de la sección de clientes o departamentos"></label>
+      <button class="primary" data-edit>Guardar nombre</button>
+    </form>
     <p class="muted">Cada cliente tiene sus propios requerimientos. El equipo y las plantillas se comparten entre clientes. Activa <b>Planner</b> para alimentar el dashboard desde el plan del cliente (solo lectura) y <b>Teams</b> para enviar avisos a su canal.</p>
     <form id="clientForm" class="inline"><input name="name" aria-label="Nombre del nuevo cliente" placeholder="Nuevo cliente (ej: Hites)" required maxlength="60" autocomplete="off" title="Solo letras y espacios"><button class="primary" data-edit>Agregar cliente</button></form>
     <div id="clientTbl" class="ccards"></div>
@@ -273,6 +278,7 @@
     <div class="pbody">
       <p class="muted sm" id="pickHint"></p>
       <div class="crow"><input type="search" id="pickQ" placeholder="Buscar por código, título o cliente" aria-label="Buscar requerimiento"><button type="button" id="pickAll">Marcar todos</button><button type="button" id="pickNone">Desmarcar todos</button></div>
+      <label id="pickDetailRow" class="pickdetail" hidden>Nivel de detalle de las columnas <select id="pickDetail" aria-label="Nivel de detalle de las columnas"><option value="day">Por días (una columna por día)</option><option value="week">Por semanas (lunes a domingo)</option><option value="month">Por meses (una columna por mes)</option></select></label>
       <div id="pickList"></div>
     </div>
     <footer><span class="muted" id="pickCnt"></span><div class="spacer"></div><button type="button" id="pickCancel">Cancelar</button><button type="button" class="primary" id="pickOk">Descargar</button></footer>
@@ -402,6 +408,8 @@
 <script src="data.js"></script>
 <script src="planner.js"></script>
 <script src="report.js"></script>
+<script src="selectsearch.js"></script>
+<script src="fx.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

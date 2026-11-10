@@ -33,6 +33,10 @@
       t.style.setProperty("--ax", Math.min(Math.max(rect.left + rect.width / 2 - (x - w / 2), 14), w - 14) + "px");
     }
   }
+  // Ningún aviso o mensaje de error debe quedarse al cambiar de solapa ni al cerrar una ventana
+  function clearNotices() { try { hideGtip(); } catch {} document.querySelectorAll(".toast").forEach(t => t.remove()); document.querySelectorAll(".ferr").forEach(x => { if (!x.closest("#login")) x.hidden = true; }); document.querySelectorAll("#app .bad").forEach(x => x.classList.remove("bad")); }
+  new MutationObserver(l => l.forEach(m => { if (m.target.tagName === "DIALOG" && m.oldValue !== null && !m.target.open) m.target.querySelectorAll(".toast").forEach(t => t.remove()); }))
+    .observe(document.documentElement, { attributes: true, attributeFilter: ["open"], attributeOldValue: true, subtree: true });   // al cerrar una ventana se van sus avisos
   const errText = e => (e && (e.message || e.error_description || e.details)) || String(e);
   window.addEventListener("error", ev => { console.error(ev.error || ev.message); toast("Error: " + (ev.message || errText(ev.error)), 1); });
   window.addEventListener("unhandledrejection", ev => { console.error(ev.reason); toast("Error: " + errText(ev.reason), 1); });
@@ -199,7 +203,7 @@
   const setIds =(x, l) => { x.assigneeIds = l; x.assigneeId = l[0] || ""; };
   const rolesOf = x => [...new Set(ids(x).flatMap(memberRoles))];
   // selector múltiple de personas (responsables QA o responsables de requerimiento): los elegidos se ven como etiquetas que se acomodan sin solaparse
-  const idPick = (list, attr, sel, off, emptyMsg) => `<details class="rolepick"><summary>${sel.length ? chips(sel.map(i => list.find(m => m.id === i)?.name || "—")) : "Sin asignar"}</summary><div class="rpmenu">${list.length ? list.map(m => `<label><input type="checkbox" ${attr} value="${m.id}"${sel.includes(m.id) ? " checked" : ""}${off ? " disabled" : ""}> ${esc(m.name)}${(m.roles || []).length ? " · " + esc(m.roles.join(", ")) : ""}</label>`).join("") : `<small class="muted">${emptyMsg}</small>`}</div></details>`;
+  const idPick = (list, attr, sel, off, emptyMsg) => `<details class="rolepick"><summary>${sel.length ? chips(sel.map(i => list.find(m => m.id === i)?.name || "—")) : "Sin asignar"}</summary><div class="rpmenu">${list.length ? `<input type="search" class="rpsearch" placeholder="Buscar por nombre…" aria-label="Buscar por nombre" autocomplete="off" maxlength="60"><small class="muted rpnone" hidden>Sin resultados</small>` : ""}${list.length ? list.map(m => `<label><input type="checkbox" ${attr} value="${m.id}"${sel.includes(m.id) ? " checked" : ""}${off ? " disabled" : ""}> ${esc(m.name)}${(m.roles || []).length ? " · " + esc(m.roles.join(", ")) : ""}</label>`).join("") : `<small class="muted">${emptyMsg}</small>`}</div></details>`;
   const memberPick = (attr, sel, off) => idPick(store.members, attr, sel, off, "Agrega miembros en Equipo");
   const lpick = (attr, sel, off) => `<details class="rolepick"><summary>${sel.length ? chips(sel) : "Sin rol"}</summary><div class="rpmenu">${store.leaderRoles.length ? store.leaderRoles.map(r => `<label><input type="checkbox" ${attr} value="${esc(r)}"${sel.includes(r) ? " checked" : ""}${off ? " disabled" : ""}> ${esc(r)}</label>`).join("") : '<small class="muted">Crea un rol primero</small>'}</div></details>`;
   const leaderIds = r => (r.leaderIds || []).filter(i => store.leaders.some(l => l.id === i));
@@ -275,11 +279,15 @@
 
   // ---------- navegación / modo ----------
   function setView(v) {
+    const changed = !$("#v-" + v) || $("#v-" + v).hidden;
+    clearNotices();                                                                       // los avisos y errores no se quedan al cambiar de solapa
+    if (changed) { try { resetTabFilters(); } catch {} }   // al cambiar de solapa se borran los filtros de Equipo, Responsables de requerimiento y Clientes/Departamentos
     if (v === "dash" && $("#v-dash").hidden) alertsOpen = false;     // al volver al Dashboard, las alertas vuelven a estar cerradas
     document.querySelectorAll(".view").forEach(e => (e.hidden = e.id !== "v-" + v));
     document.querySelectorAll("#tabs button").forEach(b => { const on = b.dataset.v === v; b.classList.toggle("on", on); if (on) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current"); });
     document.querySelector("#tabs button.on")?.scrollIntoView({ inline: "center", block: "nearest" });   // en móvil la pestaña activa queda a la vista
     render();
+    if (changed && window.QA_FX) { const vw = document.querySelector(".view:not([hidden])"); QA_FX.enter(vw); QA_FX.stagger(vw.querySelectorAll("tbody tr"), 10); }   // animación sutil al cambiar de solapa (se desactiva con «reducir movimiento»)
   }
   const fullName = () => { const p = D.getProfile(); return [p.nombres, p.apellido_paterno, p.apellido_materno].filter(Boolean).join(" "); };
   function refreshUserMenu() {
@@ -459,8 +467,8 @@
       ` · <a href="https://tasks.office.com/Home/Task/${encodeURIComponent(s.taskId)}" target="_blank" rel="noopener">Abrir en Planner</a><br><small class="muted">Planner manda en estado, prioridad, depósito y fechas solo cuando cambian allá; lo que edites aquí se conserva hasta entonces.</small>`;
   }
   function visible() {
-    const t = $("#fType").value, ro = $("#fRole").value, a = $("#fAssignee").value, s = $("#fStatus").value, q = $("#fText").value.toLowerCase();
-    return scoped().filter(r => (!t || r.type === t) && (!a || ids(r).includes(a)) && (!ro || rolesOf(r).includes(ro)) && (!s || r.status === s) && (!$("#fPrio").value || r.priority === $("#fPrio").value) && (!$("#fBucket").value || r.bucket === $("#fBucket").value) &&
+    const mv = id => QA_MS.get($("#" + id)), t = mv("fType"), ro = mv("fRole"), a = mv("fAssignee"), st = mv("fStatus"), pr = mv("fPrio"), bk = mv("fBucket"), q = $("#fText").value.toLowerCase();
+    return scoped().filter(r => (!t.length || t.includes(r.type)) && (!a.length || a.some(x => ids(r).includes(x))) && (!ro.length || ro.some(x => rolesOf(r).includes(x))) && (!st.length || st.includes(r.status)) && (!pr.length || pr.includes(r.priority)) && (!bk.length || bk.includes(r.bucket)) &&
       (!q || (r.code + " " + r.title + " " + r.comments.map(c => c.text).join(" ")).toLowerCase().includes(q)));
   }
   let alertsOpen = false;                             // las alertas arrancan cerradas; solo se abren si el usuario las abre
@@ -607,61 +615,77 @@
       const d = new Date(n * DAY), dd = d.getUTCDate();
       if (pxDay >= 28 || (pxDay >= 4 && d.getUTCDay() === 1)) ticks += `<div class="g-tick d" style="left:${x(n)}px">${dd}</div>`;
     }
-    const bar = (kind, id, obj, st, label, pct, drag) => {
-      const s = d2n(obj.start), e = Math.max(d2n(obj.end), s);
-      return `<div class="bar ${st}${drag ? "" : " nodrag"}" data-k="${kind}" data-id="${id}" style="left:${x(s)}px;width:${(e - s + 1) * pxDay}px" title="${esc(label)} · ${pct}%"><div class="fill" style="width:${pct}%"></div><i class="h l"></i><span>${pxDay >= 14 ? esc(label) : ""}</span><i class="h r"></i></div>`;
+    const ST_NAME = { Pendiente: "Pendiente", Encurso: "En curso", Bloqueado: "Bloqueado", Atrasado: "Atrasado", Completado: "Completado" };
+    const bar = (kind, id, obj, st, label, pct) => {
+      const s = d2n(obj.start), e = Math.max(d2n(obj.end), s), stName = ST_NAME[st.split(" ")[0].replace("st-", "")] || "", who = obj.name || (obj.code ? obj.code + " · " + obj.title : "");
+      const aria = `${who ? who + ". " : ""}${stName ? stName + ", " : ""}${pct}% de avance. ${fd(obj.start)} a ${fd(obj.end)}. Enter para editar las fechas.`;
+      return `<div class="bar ${st}" data-k="${kind}" data-id="${id}" tabindex="0" role="button" style="left:${x(s)}px;width:${(e - s + 1) * pxDay}px" aria-label="${esc(aria)}"><div class="fill" style="width:${pct}%"></div><span>${(pxDay >= 14 || kind !== "act") && label ? esc(label) : ""}</span></div>`;
     };
     let h = `<div class="g-inner" style="width:calc(var(--lw) + ${W}px)"><div class="g-head"><div class="g-row" style="height:46px;border:0"><div class="g-label" style="cursor:default">Requerimiento / actividad</div><div class="g-track" style="width:${W}px">${ticks}</div></div></div>`;
     for (const r of list) {
       const [s, e] = span(r), p = progress(r), st = "st-" + (late(r) && r.status !== "Bloqueado" ? "Atrasado" : r.status.replace(" ", ""));
-      const exp = !r.acts.length;
+      const exp = !r.acts.length, sumLabel = `${r.code} · ${ST_NAME[st.replace("st-", "")] || r.status} · ${p}% · vence ${fd(e)}${slip(r) ? " (+" + slip(r) + " d)" : ""}`;
       h += `<div class="g-row grp"><div class="g-label" data-open="${r.id}">${esc(r.code)} · ${esc(r.title)}<small>${r.type !== "trad" ? esc(typeName(r.type)) + " · " : ""}${esc(mnames(r))} · ${p}%</small></div>
-        <div class="g-track" style="width:${W}px">${r.committedEnd && r.committedEnd !== e ? `<i class="cmark" style="left:${x(d2n(r.committedEnd) + 1)}px" title="Fecha comprometida ${fd(r.committedEnd)}"></i>` : ""}${exp ? bar("req", r.id, r, st, r.code, p, true) : bar("sum", r.id, { start: s, end: e }, st + " sum", "", p, false)}</div></div>`;
+        <div class="g-track" style="width:${W}px">${r.committedEnd && r.committedEnd !== e ? `<i class="cmark" style="left:${x(d2n(r.committedEnd) + 1)}px" title="Fecha comprometida ${fd(r.committedEnd)}"></i>` : ""}${exp ? bar("req", r.id, r, st, sumLabel, p) : bar("sum", r.id, { start: s, end: e, name: r.code + " · " + r.title }, st + " sum", sumLabel, p)}</div></div>`;
       if (!exp) for (const a of r.acts) {
         const ast = a.blocked ? "st-Bloqueado" : a.percent >= 100 ? "st-Completado" : a.end < today ? "st-Atrasado" : a.percent > 0 ? "st-Encurso" : "st-Pendiente";
-        h += `<div class="g-row"><div class="g-label" data-open="${r.id}">&nbsp;&nbsp;${esc(a.name)}<small>${esc(mnames(a, r))}</small></div><div class="g-track" style="width:${W}px">${bar("act", r.id + "|" + a.id, a, ast, a.percent + "%", a.percent, true)}</div></div>`;
+        h += `<div class="g-row"><div class="g-label" data-open="${r.id}">&nbsp;&nbsp;${esc(a.name)}<small>${esc(mnames(a, r))}</small></div><div class="g-track" style="width:${W}px">${bar("act", r.id + "|" + a.id, a, ast, a.percent + "%", a.percent)}</div></div>`;
       }
     }
     h += `<div style="position:absolute;left:var(--lw);top:46px;bottom:0;width:${W}px;pointer-events:none"><div class="today" style="left:${x(d2n(today)) + pxDay / 2}px"></div></div></div>`;
     g.innerHTML = h;
     g.querySelectorAll("[data-open]").forEach(l => (l.onclick = () => openReq(l.dataset.open)));
-    g.querySelectorAll(".bar").forEach(bindDrag);
+    g.querySelectorAll(".bar").forEach(bindBar);
   }
-  function target(bar) {
-    const [id, aid] = bar.dataset.id.split("|"), r = store.reqs.find(x => x.id === id);
-    return bar.dataset.k === "act" ? r.acts.find(a => a.id === aid) : bar.dataset.k === "req" ? r : null;
+  // Carta Gantt: las barras no se mueven. Clic = abrir el requerimiento y dejar el cursor en la fecha de inicio de esa actividad.
+  function focusAct(aid) {
+    const i = draft?.acts.findIndex(a => a.id === aid), row = i >= 0 ? $("#actTbl tbody")?.children[i] : null; if (!row) return;
+    row.scrollIntoView({ block: "center" }); row.classList.add("rowflash"); setTimeout(() => row.classList.remove("rowflash"), 1800);
+    row.querySelector('[data-f="start"]')?.focus({ preventScroll: true });
   }
-  function bindDrag(bar) {
-    bar.addEventListener("click", () => { if (!bar._moved) openReq(bar.dataset.id.split("|")[0]); });
-    const t = target(bar);
-    if (readOnly || !t) return;
-    bar.addEventListener("pointerdown", ev => {
-      const mode = ev.target.classList.contains("l") ? "l" : ev.target.classList.contains("r") ? "r" : "m";
-      const x0 = ev.clientX, s0 = d2n(t.start), e0 = d2n(t.end), l0 = bar.offsetLeft, w0 = bar.offsetWidth;
-      bar._moved = false; bar.setPointerCapture?.(ev.pointerId);
-      const mv = e => {
-        const dd = Math.round((e.clientX - x0) / pxDay); if (dd) bar._moved = true;
-        let ns = mode === "r" ? s0 : s0 + dd, ne = mode === "l" ? e0 : e0 + dd;
-        if (mode === "l") ns = Math.min(ns, e0); if (mode === "r") ne = Math.max(ne, s0);
-        bar.style.left = l0 + (ns - s0) * pxDay + "px"; bar.style.width = w0 + ((ne - ns) - (e0 - s0)) * pxDay + "px"; bar._ns = ns; bar._ne = ne;
-      };
-      const up = async () => {
-        bar.removeEventListener("pointermove", mv); bar.removeEventListener("pointerup", up);
-        if (!bar._moved) return;
-        const [rid, aid] = bar.dataset.id.split("|"), ns = n2d(bar._ns), ne = n2d(bar._ne), r = store.reqs.find(x => x.id === rid);
-        if (badDate(ns) || badDate(ne)) { say(DATE_ERR + ": solo se permiten fechas entre " + fd(DATE_MIN) + " y " + fd(DATE_MAX) + ".", 1); render(); setTimeout(() => (bar._moved = false), 0); return; }
-        const prev = { start: t.start, end: t.end }, oldEnd = span(r)[1];
-        t.start = ns; t.end = ne; const newEnd = span(r)[1]; t.start = prev.start; t.end = prev.end;      // simulación
-        let why = "";
-        if (newEnd !== oldEnd) { why = await askReason(`${r.code}: el plazo del requerimiento cambia de ${oldEnd} a ${newEnd}.`); if (why === null) { render(); setTimeout(() => (bar._moved = false), 0); return; } }
-        const by = authorName(), at = new Date().toISOString();
-        commit(s => { const rr = s.reqs.find(x => x.id === rid); if (!rr) return; const tt = bar.dataset.k === "act" ? rr.acts.find(x => x.id === aid) : rr; if (!tt) return;
-          const before = span(rr)[1]; tt.start = ns; tt.end = ne; const [s0, e0] = span(rr); rr.start = s0; rr.end = e0; rr.lastUpdate = at;
-          if (why && e0 !== before) rr.dateLog.push({ at, by, from: before, to: e0, reason: why }); });
-        say("Guardado ✓"); render(); setTimeout(() => (bar._moved = false), 0);
-      };
-      bar.addEventListener("pointermove", mv); bar.addEventListener("pointerup", up);
-    });
+  function bindBar(bar) {
+    const open = () => { const [rid, aid] = bar.dataset.id.split("|"); hideGtip(); openReq(rid); if (aid) focusAct(aid); };
+    bar.addEventListener("click", open);
+    bar.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } });
+    bar.addEventListener("pointerenter", e => { if (e.pointerType !== "touch") showGtip(bar, e); });
+    bar.addEventListener("pointermove", e => { if (e.pointerType !== "touch") showGtip(bar, e); });
+    bar.addEventListener("pointerleave", hideGtip);
+    bar.addEventListener("focus", () => showGtip(bar)); bar.addEventListener("blur", hideGtip);
+  }
+  // Recuadro de detalle al pasar el mouse (o enfocar con teclado) sobre una barra: estado, avance, fechas, responsables y más
+  let gtipEl = null, gtipFor = null;
+  function hideGtip() { if (gtipEl) gtipEl.hidden = true; gtipFor = null; }
+  function gtipHtml(bar) {
+    const [rid, aid] = bar.dataset.id.split("|"), r = store.reqs.find(x => x.id === rid); if (!r) return "";
+    const a = aid ? r.acts.find(x => x.id === aid) : null, cls = (bar.className.match(/st-\w+/) || ["st-Pendiente"])[0], name = { "st-Pendiente": "Pendiente", "st-Encurso": "En curso", "st-Bloqueado": "Bloqueado", "st-Atrasado": "Atrasado", "st-Completado": "Completado" }[cls];
+    const row = (l, v) => (v ? `<div class="gt-r"><span>${l}</span><b>${v}</b></div>` : "");
+    const days = (s, e) => d2n(e) - d2n(s) + 1, plural = n => n + (n === 1 ? " día" : " días");
+    let title, sub, pct, rows = "", note = "", hint;
+    if (a) {
+      title = a.name; sub = `${r.code} · ${r.title}`; pct = a.percent; hint = "Clic para editar las fechas de esta actividad";
+      rows = row("Inicio", fd(a.start)) + row("Fin", fd(a.end)) + row("Duración", plural(days(a.start, a.end))) + row("Responsables", esc(mnames(a, r)));
+      if (a.blocked) note = `<div class="gt-n blk">Bloqueada${a.blockedSince ? " desde el " + fd(a.blockedSince) + " (" + lvlTxt(Math.max(0, d2n(today) - d2n(a.blockedSince))) + ")" : ""}${a.blockReason ? "<br>Motivo: " + esc(a.blockReason) : ""}</div>`;
+      else if (a.percent < 100 && a.end < today) note = `<div class="gt-n late">${lvlTxt(daysLate(a.end))} de atraso</div>`;
+    } else {
+      const [s, e] = span(r), n = r.acts.length, done = r.acts.filter(x => x.percent >= 100).length, blk = r.acts.filter(x => x.blocked).length, lt = r.acts.filter(x => x.percent < 100 && x.end < today).length;
+      title = `${r.code} · ${r.title}`; sub = `${clientName(r.clientId)} · ${typeName(r.type)}`; pct = progress(r); hint = "Clic para abrir y editar el requerimiento";
+      rows = row("Inicio", fd(s)) + row("Fin (plazo actual)", fd(e) + (late(r) ? ` <em class="gt-bad">· ${lvlTxt(daysLate(e))} de atraso</em>` : ""))
+        + (r.committedEnd ? row("Fecha comprometida", fd(r.committedEnd) + (slip(r) ? ` <em class="gt-bad">· +${plural(slip(r))}</em>` : " · en plazo")) : "")
+        + row("Duración", plural(days(s, e))) + row("Prioridad", r.priority ? esc(r.priority) : "") + row("Etapa", r.bucket ? esc(r.bucket) : "")
+        + row("Responsables QA", esc(mnames(r))) + row("Responsables de requerimiento", esc(lnames(r)))
+        + (n ? row("Actividades", `${done} de ${n} completadas${blk ? " · " + blk + " bloqueada" + (blk > 1 ? "s" : "") : ""}${lt ? " · " + lt + " atrasada" + (lt > 1 ? "s" : "") : ""}`) : "")
+        + (r.deliverables.length ? row("Entregables", `${delDone(r)} de ${r.deliverables.length}` + (delOverdue(r).length ? ` <em class="gt-bad">· ${delOverdue(r).length} vencido(s)</em>` : "")) : "");
+    }
+    return `<div class="gt-h"><div class="gt-t">${esc(title)}</div><span class="st ${cls}">${name}</span></div><div class="gt-s">${esc(sub)}</div>
+      <div class="gt-p"><div class="gt-bar"><i class="${cls}" style="width:${Math.min(100, pct)}%"></i></div><b>${pct}% de avance</b></div>${rows}${note}<div class="gt-f">${hint}</div>`;
+  }
+  function showGtip(bar, ev) {
+    if (!gtipEl) { gtipEl = document.createElement("div"); gtipEl.id = "gtip"; gtipEl.setAttribute("role", "tooltip"); gtipEl.hidden = true; document.body.append(gtipEl); }
+    if (gtipFor !== bar) { gtipEl.innerHTML = gtipHtml(bar); gtipFor = bar; }
+    gtipEl.hidden = false;
+    const w = gtipEl.offsetWidth, h = gtipEl.offsetHeight, br = bar.getBoundingClientRect(), px = ev ? ev.clientX : br.left + br.width / 2, py = ev ? ev.clientY : br.bottom;
+    const x = Math.min(Math.max(8, px + 16), innerWidth - w - 8); let y = py + 18; if (y + h > innerHeight - 8) y = Math.max(8, py - h - 14);
+    gtipEl.style.left = x + "px"; gtipEl.style.top = y + "px";
   }
 
   // ---------- Equipo ----------
@@ -751,9 +775,9 @@
     }));
   }
   function renderLeaderPick() {
-    const box = $("#leaderPick"), open = box.querySelector("details")?.open;
+    const box = $("#leaderPick"), open = box.querySelector("details")?.open, q = box.querySelector(".rpsearch")?.value || "";
     box.innerHTML = idPick(store.leaders, "data-rl", leaderIds(draft), readOnly, "Agrega responsables en la solapa «Responsables de requerimiento»");
-    if (open) box.querySelector("details").open = true;
+    if (open) { box.querySelector("details").open = true; restoreSearch(box, q); }
     box.querySelectorAll("[data-rl]").forEach(cb => (cb.onchange = () => { draft.leaderIds = [...box.querySelectorAll("[data-rl]:checked")].map(x => x.value); renderLeaderPick(); }));
   }
 
@@ -807,9 +831,9 @@
     return tplFor(draft?.type || "trad").map(a => { const x = { id: uid(), name: a.name, start: s, end: addDays(s, tplDays(a) - 1), percent: 0, blocked: false }; setIds(x, ids(draft)); s = addDays(x.end, 1); return x; });
   }
   function renderReqPick() {
-    const box = $("#assigneePick"), open = box.querySelector("details")?.open;
+    const box = $("#assigneePick"), open = box.querySelector("details")?.open, q = box.querySelector(".rpsearch")?.value || "";
     box.innerHTML = memberPick("data-ra", ids(draft), readOnly);
-    if (open) box.querySelector("details").open = true;
+    if (open) { box.querySelector("details").open = true; restoreSearch(box, q); }
     box.querySelectorAll("[data-ra]").forEach(cb => (cb.onchange = () => { setIds(draft, [...box.querySelectorAll("[data-ra]:checked")].map(x => x.value)); renderReqPick(); }));
   }
   let openSnap = "";
@@ -1023,7 +1047,7 @@
   function renderClientSel() {
     if (clientId !== "all" && !store.clients.some(c => c.id === clientId)) clientId = "all";
     const sel = $("#clientSel");
-    sel.innerHTML = `<option value="all">Todos los clientes (${store.reqs.length})</option>` + store.clients.map(c => `<option value="${c.id}">${esc(c.name)} (${store.reqs.filter(r => r.clientId === c.id).length})</option>`).join("");
+    sel.innerHTML = `<option value="all">Todos: ${esc(clientLabel())} (${store.reqs.length})</option>` + store.clients.map(c => `<option value="${c.id}">${esc(c.name)} (${store.reqs.filter(r => r.clientId === c.id).length})</option>`).join("");
     sel.value = clientId;
   }
   function renderClients() {
@@ -1044,10 +1068,77 @@
     if (!PL) { box.innerHTML = '<div class="card"><p class="muted">Módulo de avisos no disponible.</p></div>'; return; }
     box.innerHTML = PL.avisosHtml(readOnly); PL.avisosBind(box, readOnly);
   }
+  // ---------- Nombre de la sección «Clientes/Departamentos» (editable en la pestaña de clientes) ----------
+  const clientLabel = () => (store.clientLabel || "").trim() || "Clientes/Departamentos";
+  function applyClientLabel() {
+    const l = clientLabel(), tab = $('#tabs [data-v="clients"]'), inp = $("#clientLabelIn");
+    $("#clientLblTxt").textContent = l; $("#clientsTitle").textContent = l; if (tab) tab.textContent = l;
+    if (document.activeElement !== inp) inp.value = store.clientLabel || "";
+  }
+  $("#clientLabelForm").onsubmit = e => {
+    e.preventDefault(); if (readOnly) return;
+    const v = e.target.label.value.trim().replace(/\s+/g, " ");
+    commit(s => { s.clientLabel = v; }); render(); say(v ? `Nombre guardado ✓ («${v}»)` : "Nombre restablecido a «Clientes/Departamentos» ✓");
+  };
+
+  // ---------- Filtros de búsqueda dinámicos (Equipo, Responsables de requerimiento, Clientes y Permisos) ----------
+  // Cada tabla recibe una barra con un campo por columna: se filtra mientras se escribe y «Borrar filtros» solo se activa si hay alguno.
+  const nrm = t => String(t ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+  const cellTxt = td => { if (!td) return ""; const i = td.querySelector("input:not([type=checkbox])"); if (i) return i.value; const s = td.querySelector("select"); if (s) return s.selectedOptions[0]?.textContent || ""; return (td.querySelector(".rolepick summary") || td).textContent; };
+  const cellChips = td => [...(td?.querySelectorAll(".rolepick summary .chip") || [])].map(c => c.textContent.trim());
+  const fT = (col, ph) => ({ ph, test: (r, v) => nrm(cellTxt(r.children[col])).includes(nrm(v)) });
+  const fR = (col, opts) => ({ all: "Todos los roles", opts, test: (r, v) => cellChips(r.children[col]).includes(v) });
+  const fA = col => ({ all: "Requerimientos activos: todos", opts: [["con", "Con requerimientos activos"], ["sin", "Sin requerimientos activos"]], test: (r, v) => ((parseInt(r.children[col]?.textContent) || 0) > 0) === (v === "con") });
+  const TFS = [
+    { id: "memberTbl", fields: [fT(0, "Buscar por nombre…"), fT(1, "Buscar por correo…"), fR(2, () => store.roles), fA(3)] },
+    { id: "profTbl", fields: [fT(0, "Buscar por nombre…"), fT(1, "Buscar por cargo…"), fT(5, "Buscar por correo…")] },
+    { id: "roleTbl", fields: [fT(0, "Buscar por nombre de rol…"), fT(1, "Buscar por integrante…")] },
+    { id: "leaderTbl", fields: [fT(0, "Buscar por nombre…"), fT(1, "Buscar por correo…"), fR(2, () => store.leaderRoles), fA(3)] },
+    { id: "leaderRoleTbl", fields: [fT(0, "Buscar por nombre de rol…"), fT(1, "Buscar por responsable…")] },
+    { id: "permTbl", fields: [fT(0, "Buscar por correo…"), fT(1, "Buscar por nombre…"),
+      { all: "Todos los estados", opts: [["Activa", "Activa"], ["Pendiente", "Pendiente de autorización"], ["Bloqueada", "Bloqueada"]], test: (r, v) => nrm(r.children[2]?.textContent).includes(nrm(v)) },
+      { all: "Todos los permisos", opts: () => Object.entries(ROLE_TXT), test: (r, v) => r.children[3]?.querySelector("select")?.value === v }] },
+    { id: "clientTbl", cards: true, fields: [{ ph: "Buscar por nombre…", test: (c, v) => nrm(c.querySelector("[data-cn]")?.value).includes(nrm(v)) },
+      { all: "Todos (con y sin requerimientos)", opts: [["con", "Con requerimientos"], ["sin", "Sin requerimientos"]], test: (c, v) => ((parseInt(c.querySelector(".chead .muted")?.textContent) || 0) > 0) === (v === "con") },
+      { all: "Planner: todos", opts: [["si", "Con Planner conectado"], ["no", "Sin Planner"]], test: (c, v) => !!c.querySelector("[data-pl-en]")?.checked === (v === "si") }] }
+  ];
+  const tfOpts = f => (typeof f.opts === "function" ? f.opts() : f.opts || []).map(o => (Array.isArray(o) ? o : [o, o]));
+  function applyTF(d) {
+    const root = $("#" + d.id); if (!root) return;
+    d.fields.forEach((f, i) => {                                   // las listas de roles se actualizan si cambian
+      if (!f.opts) return; const sel = d.ctrls[i], o = tfOpts(f), sig = JSON.stringify(o);
+      if (sel.dataset.sig !== sig) { const keep = sel.value; sel.innerHTML = `<option value="">${esc(f.all)}</option>` + o.map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join(""); sel.dataset.sig = sig; sel.value = o.some(([v]) => v === keep) ? keep : ""; }
+    });
+    const vals = d.ctrls.map(c => (c.tagName === "SELECT" ? QA_MS.get(c) : c.value.trim())), items = d.cards ? [...root.querySelectorAll(".ccard")] : [...root.querySelectorAll("tbody tr")].filter(r => !r.querySelector("td[colspan]"));
+    let shown = 0;
+    items.forEach(it => { const ok = d.fields.every((f, i) => !vals[i] || !vals[i].length || (Array.isArray(vals[i]) ? vals[i].some(v => f.test(it, v)) : f.test(it, vals[i]))); it.hidden = !ok; if (ok) shown++; });
+    d.msg.hidden = !(items.length && !shown);
+    d.clear.disabled = !vals.some(v => (Array.isArray(v) ? v.length : v));
+  }
+  function initTF() {
+    TFS.forEach(d => {
+      const root = $("#" + d.id); if (!root) return;
+      const anchor = root.closest(".tablewrap") || root, bar = document.createElement("div");
+      bar.className = "toolbar tfbar"; bar.setAttribute("role", "search");
+      d.ctrls = d.fields.map(f => { const c = document.createElement(f.opts ? "select" : "input"); if (!f.opts) { c.type = "search"; c.placeholder = f.ph; c.autocomplete = "off"; c.maxLength = 60; } c.setAttribute("aria-label", f.opts ? f.all : f.ph.replace("…", "")); c.className = "tfctl"; bar.append(c); return c; });
+      d.clear = document.createElement("button"); d.clear.type = "button"; d.clear.className = "ghost"; d.clear.disabled = true; d.clear.textContent = "✕ Borrar filtros"; d.clear.title = "Quita todos los filtros de esta tabla (se activa cuando hay alguno)"; bar.append(d.clear);
+      d.msg = document.createElement("p"); d.msg.className = "muted tfnone"; d.msg.hidden = true; d.msg.textContent = "Ningún resultado con estos filtros.";
+      anchor.before(bar); anchor.after(d.msg);
+      d.ctrls.forEach(c => { if (c.tagName === "SELECT") QA_MS.enhance(c); c.addEventListener(c.tagName === "SELECT" ? "change" : "input", () => applyTF(d)); });
+      d.clear.onclick = () => { d.ctrls.forEach(c => (c.tagName === "SELECT" ? QA_MS.clear(c, true) : (c.value = ""))); applyTF(d); (d.ctrls[0]._mfx || d.ctrls[0]).focus(); };
+      new MutationObserver(() => applyTF(d)).observe(root, { childList: true });       // la tabla se vuelve a dibujar: se reaplican los filtros
+      applyTF(d);
+    });
+  }
+  initTF();
+  // Solo en Equipo, Responsables de requerimiento y Clientes/Departamentos: al cambiar de solapa los filtros vuelven a vacío (Permisos y Dashboard conservan los suyos)
+  function resetTabFilters() {
+    TFS.forEach(d => { if (d.id === "permTbl" || !d.ctrls) return; d.ctrls.forEach(c => (c.tagName === "SELECT" ? QA_MS.clear(c, true) : (c.value = ""))); applyTF(d); });
+  }
   const FILTERS = ["fType", "fRole", "fAssignee", "fPrio", "fBucket", "fStatus"];
-  const syncClear = () => { $("#btnClearFilters").disabled = !(FILTERS.some(i => $("#" + i).value) || $("#fText").value.trim()); };   // activo solo si hay algún filtro
+  const syncClear = () => { $("#btnClearFilters").disabled = !(FILTERS.some(i => QA_MS.get($("#" + i)).length) || $("#fText").value.trim()); };   // activo solo si hay algún filtro
   function render() {
-    renderTypeFilter(); syncClear();
+    renderTypeFilter(); syncClear(); applyClientLabel();
     if (PL) $("#btnSync").hidden = !PL.anyEnabled();
     if (!$("#v-dash").hidden) renderDash();
     if (!$("#v-hoy").hidden) renderHoy();
@@ -1154,12 +1245,14 @@
   // ---------- Selector de requerimientos (informe Word y exportar Gantt) ----------
   const reqStLbl = r => (late(r) && r.status !== "Bloqueado" && r.status !== "Completado" ? "Atrasado" : r.status);
   // Abre el diálogo para elegir uno o varios requerimientos entre los que se ven en el dashboard. Devuelve la lista elegida, o null si cancela.
-  function pickReqs({ title, ok, hint }) {
+  let pickedDetail = "day";
+  function pickReqs({ title, ok, hint, detail }) {
     return new Promise(res => {
       const list = visible().sort((x, y) => clientName(x.clientId).localeCompare(clientName(y.clientId)) || x.code.localeCompare(y.code));
       if (!list.length) { say("No hay requerimientos para elegir (revisa los filtros).", 1); return res(null); }
       const dlg = $("#pickdlg"), q = $("#pickQ"), sel = new Set(list.map(r => r.id));
       $("#pickTitle").textContent = title; $("#pickOk").textContent = ok; $("#pickHint").textContent = hint || ""; q.value = "";
+      $("#pickDetailRow").hidden = !detail; if (detail) $("#pickDetail").value = pxDay >= 28 ? "day" : pxDay >= 10 ? "week" : "month";   // por defecto, el zoom que estás viendo
       const shown = () => { const t = q.value.trim().toLowerCase(); return list.filter(r => !t || (r.code + " " + r.title + " " + clientName(r.clientId)).toLowerCase().includes(t)); };
       const upd = () => { $("#pickCnt").textContent = `${sel.size} de ${list.length} seleccionados`; $("#pickOk").disabled = !sel.size; };
       const draw = () => {
@@ -1172,7 +1265,7 @@
       $("#pickAll").onclick = () => { shown().forEach(r => sel.add(r.id)); draw(); };
       $("#pickNone").onclick = () => { shown().forEach(r => sel.delete(r.id)); draw(); };
       const done = v => { dlg.close(); res(v); };
-      $("#pickOk").onclick = () => done(list.filter(r => sel.has(r.id)));
+      $("#pickOk").onclick = () => { pickedDetail = $("#pickDetail").value; done(list.filter(r => sel.has(r.id))); };
       $("#pickCancel").onclick = $("#pickClose").onclick = () => done(null);
       dlg.oncancel = e => { e.preventDefault(); done(null); };
       draw(); dlg.showModal(); q.focus();
@@ -1192,37 +1285,43 @@
   }
 
   // ---------- Exportar carta Gantt ----------
-  function ganttHtml(forPrint, pick) {
+  function ganttHtml(forPrint, pick, detail) {
     const list = (pick || visible()).slice().sort((x, y) => clientName(x.clientId).localeCompare(clientName(y.clientId)) || x.code.localeCompare(y.code));
     if (!list.length) return null;
     const all = list.flatMap(r => span(r)).concat(today).map(d2n);
     const lastD = new Date(Math.max(...all) * DAY);
     let min = Math.min(...all) - 1, max = Math.round(Date.UTC(lastD.getUTCFullYear(), lastD.getUTCMonth() + 2, 0) / DAY);   // hasta fin del mes siguiente al último término
-    const weekly = max - min > 100;
-    if (weekly) min -= (new Date(min * DAY).getUTCDay() + 6) % 7;            // lunes
-    const step = weekly ? 7 : 1, cols = [];
-    for (let n = min; n <= max; n += step) cols.push(n);
+    let mode = ["day", "week", "month"].includes(detail) ? detail : (max - min > 100 ? "week" : "day"), fellBack = false;
+    const build = m => {                                                      // columnas [desde, hasta] según el nivel de detalle
+      const out = [];
+      if (m === "day") for (let n = min; n <= max; n++) out.push([n, n]);
+      else if (m === "week") for (let n = min - ((new Date(min * DAY).getUTCDay() + 6) % 7); n <= max; n += 7) out.push([n, n + 6]);        // semanas de lunes a domingo
+      else for (let d = new Date(min * DAY), n = Math.round(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) / DAY); n <= max;) { const q = new Date(n * DAY), nx = Math.round(Date.UTC(q.getUTCFullYear(), q.getUTCMonth() + 1, 1) / DAY); out.push([n, nx - 1]); n = nx; }
+      return out;
+    };
+    let cols = build(mode);
+    if (mode === "day" && cols.length > 400) { mode = "week"; cols = build(mode); fellBack = true; }   // por días solo cabe un rango razonable
     const COL = { Completado: "#2e9e6a", "En curso": "#2f6fed", Bloqueado: "#e0a400", Atrasado: "#d6394a", Pendiente: "#9aa3b5" };
     const tint = c => "#" + [1, 3, 5].map(i => Math.round(parseInt(c.slice(i, i + 2), 16) * 0.4 + 255 * 0.6).toString(16).padStart(2, "0")).join("");   // tono claro sólido: Excel ignora los colores con transparencia (#rrggbbaa)
     const actSt = a => a.blocked ? "Bloqueado" : a.percent >= 100 ? "Completado" : a.end < today ? "Atrasado" : a.percent > 0 ? "En curso" : "Pendiente";
     const reqSt = r => (late(r) && r.status !== "Bloqueado" && r.status !== "Completado") ? "Atrasado" : r.status;
-    const months = [];
-    cols.forEach(n => { const d = new Date(n * DAY), k = d.toLocaleDateString("es", { month: "short", year: "2-digit", timeZone: "UTC" }); const l = months[months.length - 1]; l && l.k === k ? l.n++ : months.push({ k, n: 1 }); });
-    const cell = (n, s, e, pct, color) => {
-      const to = n + step - 1, today0 = d2n(today), isToday = today0 >= n && today0 <= to;
-      const wk = !weekly && [0, 6].includes(new Date(n * DAY).getUTCDay());
+    const grp = [];                                                          // fila superior: meses (por días/semanas) o años (por meses)
+    cols.forEach(([n]) => { const d = new Date(n * DAY), k = mode === "month" ? String(d.getUTCFullYear()) : d.toLocaleDateString("es", { month: "short", year: "2-digit", timeZone: "UTC" }); const l = grp[grp.length - 1]; l && l.k === k ? l.n++ : grp.push({ k, n: 1 }); });
+    const sub2 = ([n]) => { const d = new Date(n * DAY); return mode === "month" ? d.toLocaleDateString("es", { month: "short", timeZone: "UTC" }) : mode === "week" ? d.getUTCDate() + "/" + (d.getUTCMonth() + 1) : String(d.getUTCDate()); };
+    const cell = ([n, to], s, e, pct, color) => {
+      const today0 = d2n(today), isToday = today0 >= n && today0 <= to, wk = mode === "day" && [0, 6].includes(new Date(n * DAY).getUTCDay());
       const border = isToday ? "border-left:2px solid #d6394a;" : "";
       if (e < n || s > to) return `<td style="${border}${wk ? "background:#f0f0f0;" : ""}"></td>`;
-      const len = e - s + 1, done = Math.round(pct / 100 * len), idx = Math.max(n, s) - s + (weekly ? Math.min(step - 1, 0) : 0);
+      const len = e - s + 1, done = Math.round(pct / 100 * len), idx = Math.max(n, s) - s;
       return `<td style="${border}background:${idx < done ? color : tint(color)};"></td>`;
     };
     const th = "background:#0b1220;color:#fff;font-weight:bold;text-align:center;border:1px solid #333;";
     let t = `<table border="1" cellspacing="0" cellpadding="3" style="border-collapse:collapse;font-family:Calibri,Arial,sans-serif;font-size:${forPrint ? 8 : 11}pt">
       <tr><td colspan="${9 + cols.length}" style="font-size:16pt;font-weight:bold;border:0">Carta Gantt QA — ${esc(clientId === "all" ? "Todos los clientes" : clientName(clientId))}</td></tr>
-      <tr><td colspan="${9 + cols.length}" style="border:0;color:#555">Generada el ${today} · Vista ${weekly ? "semanal" : "diaria"} · Avance: tono fuerte = completado, tono claro = pendiente · Línea roja = hoy</td></tr>
-      <tr>${["Cliente", "Requerimiento", "Actividad", "Responsable", "Inicio", "Fin", "Avance", "Estado", "Tipo"].map(x => `<td rowspan="2" style="${th}">${x}</td>`).join("")}${months.map(m => `<td colspan="${m.n}" style="${th}">${esc(m.k)}</td>`).join("")}</tr>
-      <tr>${cols.map(n => { const d = new Date(n * DAY); return `<td style="${th}font-size:${weekly ? 7 : 8}pt">${weekly ? d.getUTCDate() + "/" + (d.getUTCMonth() + 1) : d.getUTCDate()}</td>`; }).join("")}</tr>`;
-    const row = (cl, req, act, who, s, e, pct, st, tipo, bold) => `<tr style="${bold ? "font-weight:bold;background:#eef2fb;" : ""}"><td>${esc(cl)}</td><td>${esc(req)}</td><td>${esc(act)}</td><td>${esc(who)}</td><td style="white-space:nowrap">${esc(fd(s))}</td><td style="white-space:nowrap">${esc(fd(e))}</td><td style="text-align:center">${esc(pct)}%</td><td style="color:${COL[st]};font-weight:bold">${esc(st)}</td><td>${esc(tipo)}</td>${cols.map(n => cell(n, d2n(s), d2n(e), pct, COL[st])).join("")}</tr>`;
+      <tr><td colspan="${9 + cols.length}" style="border:0;color:#555">Generada el ${today} · Vista ${{ day: "por días", week: "por semanas", month: "por meses" }[mode]}${fellBack ? " (el rango era muy largo para verlo por días)" : ""} · Avance: tono fuerte = completado, tono claro = pendiente · Línea roja = hoy</td></tr>
+      <tr>${["Cliente", "Requerimiento", "Actividad", "Responsable", "Inicio", "Fin", "Avance", "Estado", "Tipo"].map(x => `<td rowspan="2" style="${th}">${x}</td>`).join("")}${grp.map(m => `<td colspan="${m.n}" style="${th}">${esc(m.k)}</td>`).join("")}</tr>
+      <tr>${cols.map(c => `<td style="${th}font-size:${mode === "day" ? 8 : 7.5}pt">${esc(sub2(c))}</td>`).join("")}</tr>`;
+    const row = (cl, req, act, who, s, e, pct, st, tipo, bold) => `<tr style="${bold ? "font-weight:bold;background:#eef2fb;" : ""}"><td>${esc(cl)}</td><td>${esc(req)}</td><td>${esc(act)}</td><td>${esc(who)}</td><td style="white-space:nowrap">${esc(fd(s))}</td><td style="white-space:nowrap">${esc(fd(e))}</td><td style="text-align:center">${esc(pct)}%</td><td style="color:${COL[st]};font-weight:bold">${esc(st)}</td><td>${esc(tipo)}</td>${cols.map(c => cell(c, d2n(s), d2n(e), pct, COL[st])).join("")}</tr>`;
     for (const r of list) {
       const [s, e] = span(r), p = progress(r), rs = reqSt(r), cn = clientName(r.clientId), nm = `${r.code} · ${r.title}`;
       t += row(cn, nm, r.acts.length ? "(resumen)" : "—", mnames(r), s, e, p, rs, typeName(r.type), true);
@@ -1231,16 +1330,16 @@
     return t + "</table>";
   }
   async function exportGanttXls() {
-    const list = await pickReqs({ title: "Exportar Gantt (Excel)", ok: "Exportar Excel", hint: "Elige los requerimientos que quieres incluir en la carta Gantt." }); if (!list) return;
-    const t = ganttHtml(false, list); if (!t) return say("No hay requerimientos para exportar.", 1);
+    const list = await pickReqs({ title: "Exportar Gantt (Excel)", ok: "Exportar Excel", hint: "Elige los requerimientos que quieres incluir y el nivel de detalle de las columnas.", detail: true }); if (!list) return;
+    const t = ganttHtml(false, list, pickedDetail); if (!t) return say("No hay requerimientos para exportar.", 1);
     const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8"><!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>Carta Gantt</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]--></head><body>${t}</body></html>`;
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob(["\ufeff" + html], { type: "application/vnd.ms-excel" }));
     a.download = `carta-gantt-qa-${today}.xls`; a.click(); say("Gantt exportado ✓");
   }
   async function exportGanttPdf() {
-    const list = await pickReqs({ title: "Exportar Gantt (PDF)", ok: "Exportar PDF", hint: "Elige los requerimientos que quieres incluir en la carta Gantt." }); if (!list) return;
-    const t = ganttHtml(true, list); if (!t) return say("No hay requerimientos para exportar.", 1);
+    const list = await pickReqs({ title: "Exportar Gantt (PDF)", ok: "Exportar PDF", hint: "Elige los requerimientos que quieres incluir y el nivel de detalle de las columnas.", detail: true }); if (!list) return;
+    const t = ganttHtml(true, list, pickedDetail); if (!t) return say("No hay requerimientos para exportar.", 1);
     const w = window.open("", "_blank"); if (!w) return say("El navegador bloqueó la ventana del PDF. Permite ventanas emergentes para este sitio y vuelve a intentarlo.", 1);
     w.document.open(); w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Carta Gantt QA ${today}</title><style>@page{size:A3 landscape;margin:10mm}body{margin:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}table td{padding:2px 4px;white-space:nowrap}</style></head><body>${t}<script>onload=()=>setTimeout(()=>print(),300)</script></body></html>`);
     w.document.close();
@@ -1275,7 +1374,7 @@
   $("#btnGanttPdf").onclick = exportGanttPdf;
   FILTERS.forEach(i => ($("#" + i).onchange = render)); $("#fText").oninput = render;   // (prioridad y etapa antes no refrescaban la tabla al cambiar)
   $("#actionbar").addEventListener("change", syncClear);
-  $("#btnClearFilters").onclick = () => { FILTERS.forEach(i => ($("#" + i).value = "")); $("#fText").value = ""; render(); say("Filtros borrados ✓"); };
+  $("#btnClearFilters").onclick = () => { FILTERS.forEach(i => QA_MS.clear($("#" + i), true)); $("#fText").value = ""; render(); say("Filtros borrados ✓"); };
   document.querySelectorAll("#zoom button").forEach(b => (b.onclick = () => { pxDay = +b.dataset.z; lsSet("qa-zoom", pxDay); renderGantt(); }));
   [$("#memberForm").name, $("#leaderForm").name, $("#roleForm").role, $("#leaderRoleForm").role, $("#clientForm").name].forEach(el => filterInput(el, cleanStage));   // solo letras y espacios
   $("#memberForm").onsubmit = e => { e.preventDefault(); if (readOnly) return; const f = e.target; fieldErr(f.name, ""); fieldErr(f.email, "");
@@ -1285,10 +1384,20 @@
     if (f.email.value.trim() && store.members.some(m => (m.email || "").toLowerCase() === f.email.value.trim().toLowerCase())) return fieldErr(f.email, "Ese correo ya pertenece a otro integrante.");
     store.members.push({ id: uid(), name: f.name.value.trim(), email: f.email.value.trim(), roles: [...document.querySelectorAll("#memberRole input:checked")].map(x => x.value) }); f.reset(); save(); render(); };
   // el menú se posiciona sobre la ventana (fixed) para que ninguna columna lo recorte ni lo solape
-  const placeMenu = d => { const m = d.querySelector(".rpmenu"), r = d.querySelector("summary").getBoundingClientRect(), h = Math.min(m.scrollHeight, 320), below = innerHeight - r.bottom - 12, up = below < h && r.top > below;
-    Object.assign(m.style, { position: "fixed", left: r.left + "px", minWidth: r.width + "px", maxHeight: Math.max(120, Math.min(320, up ? r.top - 12 : below)) + "px", overflowY: "auto", top: up ? "" : r.bottom + 4 + "px", bottom: up ? innerHeight - r.top + 4 + "px" : "" }); };
-  document.addEventListener("toggle", e => { if (e.target.matches?.(".rolepick[open]")) placeMenu(e.target); }, true);
-  document.addEventListener("scroll", e => { if (!e.target.closest?.(".rpmenu")) document.querySelectorAll(".rolepick[open]").forEach(d => (d.open = false)); }, true);
+  // se abre hacia el lado de la pantalla con más espacio libre (arriba o abajo del campo), con tope de 320 px y scroll propio
+  const placeMenu = d => { const m = d.querySelector(".rpmenu"), r = d.querySelector("summary").getBoundingClientRect();
+    m.style.maxHeight = "none"; const h = Math.min(m.scrollHeight, 320);
+    const bottomGap = 12 + (document.getElementById("envBar") ? 28 : 0), below = innerHeight - r.bottom - bottomGap - 4, above = r.top - 12 - 4, up = below < h && above > below, room = up ? above : below;
+    Object.assign(m.style, { position: "fixed", left: Math.max(8, Math.min(r.left, innerWidth - Math.max(r.width, 200) - 8)) + "px", minWidth: r.width + "px", maxHeight: Math.max(120, Math.min(320, room)) + "px", overflowY: "auto", top: up ? "auto" : r.bottom + 4 + "px", bottom: up ? innerHeight - r.top + 4 + "px" : "auto" }); };
+  // buscador de nombres dentro de los desplegables de personas
+  const normTxt = t => String(t || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+  const filterMenu = menu => { const q = normTxt(menu.querySelector(".rpsearch")?.value); let n = 0; menu.querySelectorAll("label").forEach(l => { const ok = !q || normTxt(l.textContent).includes(q); l.hidden = !ok; if (ok) n++; }); const none = menu.querySelector(".rpnone"); if (none) none.hidden = n > 0; };
+  function restoreSearch(box, q) { const i = box.querySelector(".rpsearch"); if (!i) return; i.value = q; filterMenu(i.closest(".rpmenu")); const d = i.closest("details"); if (d?.open) { placeMenu(d); if (q) i.focus({ preventScroll: true }); } }
+  document.addEventListener("input", e => { if (e.target.classList?.contains("rpsearch")) { filterMenu(e.target.closest(".rpmenu")); placeMenu(e.target.closest("details")); } }, true);
+  document.addEventListener("keydown", e => { if (!e.target.classList?.contains("rpsearch")) return; if (e.key === "Enter") e.preventDefault(); else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); const d = e.target.closest("details"); d.open = false; d.querySelector("summary").focus(); } }, true);
+  document.addEventListener("toggle", e => { if (e.target.matches?.(".rolepick[open]")) { placeMenu(e.target); e.target.querySelector(".rpsearch")?.focus({ preventScroll: true }); } }, true);
+  // al desplazar la ventana el menú abierto sigue pegado a su campo; solo se cierra si el campo sale de la pantalla
+  document.addEventListener("scroll", e => { if (e.target.closest?.(".rpmenu")) return; document.querySelectorAll(".rolepick[open]").forEach(d => { const r = d.querySelector("summary").getBoundingClientRect(); if (r.bottom < 0 || r.top > innerHeight) d.open = false; else placeMenu(d); }); }, true);
   document.addEventListener("click", e => document.querySelectorAll(".rolepick[open]").forEach(d => { if (!d.contains(e.target)) d.open = false; }));
   $("#leaderForm").onsubmit = e => { e.preventDefault(); if (readOnly) return; const f = e.target; fieldErr(f.name, ""); fieldErr(f.email, "");
     const name = f.name.value.trim(), email = f.email.value.trim();

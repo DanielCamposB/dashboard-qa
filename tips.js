@@ -74,7 +74,7 @@
       "motivo": "Explica por qué cambia el plazo; queda en el historial de cambios de plazo.",
       "contraseña actual": "La contraseña con la que ingresas hoy.", "nueva contraseña": "Mínimo 8 caracteres con mayúscula, minúscula, número y símbolo.",
     },
-    gantt: { "requerimiento / actividad": "Cada requerimiento con sus actividades. Las barras muestran el avance; la línea roja es hoy y la punteada, la fecha comprometida. Arrastra una barra para mover fechas (modo Editor)." },
+    gantt: { "requerimiento / actividad": "Cada requerimiento con sus actividades. Las barras muestran el avance; la línea roja es hoy y la punteada, la fecha comprometida. Pasa el mouse por una barra para ver su detalle y haz clic para editar sus fechas." },
     kpi: {
       "requerimientos": "Total de requerimientos con los filtros aplicados.", "qa express": "Requerimientos del tipo Express.", "qa tradicional": "Requerimientos del tipo Tradicional.",
       "en curso": "Requerimientos en ejecución.", "bloqueados": "Requerimientos con alguna actividad bloqueada.", "atrasados": "Con fecha de término vencida y sin completar.",

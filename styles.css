@@ -759,3 +759,101 @@ button,select,input,summary,label,a,.qhint{touch-action:manipulation}           
 /* Carta Gantt: meses como segmentos continuos (sin solaparse) y días/semanas a lo largo de toda la escala */
 .g-head .g-tick.g-seg{overflow:hidden;text-overflow:ellipsis;box-sizing:border-box;border-left:1px solid var(--line);background:color-mix(in srgb,var(--line) 35%,transparent)}
 .g-head .g-tick.d{font-size:10px;padding:2px 2px}
+
+/* el menú de los desplegables no ocupa espacio dentro de la ventana con scroll: abrirlo no desplaza ni recorta nada */
+.rolepick .rpmenu{position:fixed}
+
+/* buscador de nombres dentro de los desplegables de personas */
+.rpmenu .rpsearch{position:sticky;top:0;display:block;width:100%;box-sizing:border-box;margin:0 0 6px;padding:8px 10px;font-size:13px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink);z-index:1}
+.rform .rpmenu .rpsearch,.rpmenu input.rpsearch{width:100%;margin:0 0 6px}
+.rpmenu .rpsearch:focus{outline:2px solid var(--acc);outline-offset:0}
+.rpmenu label[hidden],.rpmenu .rpnone[hidden]{display:none!important}
+.rpmenu .rpnone{display:block;padding:8px 10px}
+
+/* Filtros de búsqueda de las tablas (Equipo, Responsables, Clientes, Permisos) */
+.tfbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:10px 0;padding:0}
+.tfbar .tfctl{flex:1 1 170px;min-width:150px;max-width:260px}
+.tfbar button{white-space:nowrap}
+.tfbar button:disabled{opacity:.45;cursor:not-allowed}
+.tfnone{padding:10px 6px;margin:0}
+tr[hidden],.ccard[hidden]{display:none!important}
+#clientLabelForm{align-items:flex-end;margin-bottom:10px}
+#clientLabelForm .lbl{flex:1 1 320px;margin:0}
+#clientLabelForm input{display:block;width:100%;max-width:340px;margin-top:4px}
+
+/* Carta Gantt: barras fijas (no se arrastran); clic = editar fechas */
+.bar,.bar.nodrag{cursor:pointer}
+.bar .h{display:none!important}
+.bar.sum{top:6px!important;height:22px!important;opacity:1}
+.bar.sum span{font-weight:700;letter-spacing:.01em}
+.bar:focus-visible{outline:2px solid var(--acc);outline-offset:2px;z-index:3}
+.bar:hover{filter:brightness(1.12)}
+.rowflash{animation:rowflash 1.8s ease-out}
+@keyframes rowflash{0%,55%{background:color-mix(in srgb,var(--acc) 26%,transparent)}100%{background:transparent}}
+
+/* Recuadro de detalle de la Carta Gantt (estética del sitio) */
+#gtip{position:fixed;z-index:9000;width:min(360px,calc(100vw - 16px));box-sizing:border-box;padding:14px 16px 12px;border-radius:14px;background:var(--card);color:var(--ink);border:1px solid color-mix(in srgb,var(--acc) 40%,var(--line));box-shadow:0 14px 38px rgba(0,0,0,.45),0 0 0 1px rgba(255,255,255,.03);font-size:13px;line-height:1.4;pointer-events:none}
+#gtip[hidden]{display:none}
+#gtip .gt-h{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+#gtip .gt-t{font-weight:800;font-size:14.5px;line-height:1.3;overflow-wrap:anywhere}
+#gtip .gt-h .st{flex:none;padding:3px 11px;font-weight:700;font-size:12px}
+#gtip .st.st-Bloqueado,#gtip .gt-bar i.st-Bloqueado{background:#e0a400;color:#1a1200}
+#gtip .gt-s{margin-top:2px;color:var(--mut);font-size:12px;overflow-wrap:anywhere}
+#gtip .gt-p{display:flex;align-items:center;gap:10px;margin:11px 0 9px}
+#gtip .gt-bar{flex:1;height:9px;border-radius:99px;background:var(--line);overflow:hidden}
+#gtip .gt-bar i{display:block;height:100%;border-radius:99px}
+#gtip .gt-p b{flex:none;font-size:13px;font-variant-numeric:tabular-nums}
+#gtip .gt-r{display:grid;grid-template-columns:128px 1fr;gap:8px;padding:5px 0;border-top:1px solid color-mix(in srgb,var(--line) 70%,transparent)}
+#gtip .gt-r span{color:var(--mut);font-size:12px}
+#gtip .gt-r b{font-weight:600;overflow-wrap:anywhere}
+#gtip .gt-bad{font-style:normal;color:var(--s-atr-ink,#ff7b8a);font-weight:700}
+#gtip .gt-n{margin-top:8px;padding:8px 10px;border-radius:9px;font-size:12.5px;font-weight:600}
+#gtip .gt-n.blk{background:color-mix(in srgb,#e0a400 20%,transparent);color:var(--s-bloq-ink,#e0a400)}
+#gtip .gt-n.late{background:color-mix(in srgb,#d6394a 18%,transparent);color:var(--s-atr-ink,#ff7b8a)}
+#gtip .gt-f{margin-top:9px;padding-top:8px;border-top:1px solid var(--line);color:var(--mut);font-size:11.5px}
+
+.pickdetail{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:10px 0 4px;font-weight:600}
+.pickdetail select{min-width:260px}
+
+/* Filtros de tablas: los desplegables se ajustan al texto de su opción más larga (no se cortan) */
+.tfbar select.tfctl{flex:0 0 auto;width:auto;min-width:0;max-width:100%;text-overflow:clip;padding-right:34px}
+.tfbar input.tfctl{flex:1 1 200px;min-width:170px;max-width:300px}
+
+/* Buscador dentro de los desplegables de filtros */
+.sxp{position:fixed;z-index:9500;box-sizing:border-box;padding:8px;border-radius:12px;background:var(--card);color:var(--ink);border:1px solid color-mix(in srgb,var(--acc) 40%,var(--line));box-shadow:0 14px 38px rgba(0,0,0,.45)}
+.sxp[hidden]{display:none}
+.sxq{display:block;width:100%;box-sizing:border-box;margin:0 0 6px;padding:8px 10px;font-size:13px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
+.sxq:focus{outline:2px solid var(--acc);outline-offset:0}
+.sxl{overflow:auto;overscroll-behavior:contain}
+.sxo{padding:8px 10px;border-radius:8px;cursor:pointer;font-size:13.5px;line-height:1.3;overflow-wrap:anywhere}
+.sxo.act{background:color-mix(in srgb,var(--acc) 18%,transparent)}
+.sxo[aria-selected=true]{font-weight:700}
+.sxo[aria-selected=true]::after{content:" ✓";color:var(--acc)}
+.sxo[aria-disabled=true]{opacity:.45;cursor:not-allowed}
+.sxn{padding:10px;color:var(--mut);font-size:13px}
+
+/* Filtros de selección múltiple: etiquetas con «×» */
+.mfx{display:flex;flex-wrap:wrap;align-items:center;gap:5px;box-sizing:border-box;min-width:170px;max-width:360px;min-height:38px;padding:4px 34px 4px 10px;border:1px solid var(--line);border-radius:6px;background:var(--card) var(--chev) no-repeat right 12px center;color:var(--ink);cursor:pointer;font-size:15px}
+.mfx:focus-visible,.mfx[aria-expanded=true]{outline:2px solid var(--acc);outline-offset:0;border-color:var(--acc)}
+.mfx-ph{padding:3px 0}
+.mfx-chip{display:inline-flex;align-items:center;gap:2px;max-width:200px;padding:1px 3px 1px 9px;border-radius:99px;background:color-mix(in srgb,var(--acc) 22%,transparent);border:1px solid color-mix(in srgb,var(--acc) 45%,transparent);font-size:12.5px;font-weight:600;line-height:1.6}
+.mfx-t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mfx-x{flex:none;display:inline-grid;place-items:center;width:20px;height:20px;padding:0;margin:0;border:0;border-radius:50%;background:transparent;color:inherit;font-size:16px;line-height:1;cursor:pointer}
+.mfx-x:hover{background:color-mix(in srgb,var(--s-atr,#d6394a) 40%,transparent)}
+.tfbar .mfx{flex:0 1 auto}
+.sxo.chk{position:relative;padding-left:34px}
+.sxo.chk::before{content:"";position:absolute;left:10px;top:50%;width:15px;height:15px;margin-top:-7.5px;border:2px solid var(--mut);border-radius:4px;box-sizing:border-box}
+.sxo.chk[aria-selected=true]::before{background:var(--acc);border-color:var(--acc)}
+.sxo.chk[aria-selected=true]::after{content:"✓";position:absolute;left:12.5px;top:50%;margin-top:-9px;color:#00121a;font-size:12px;font-weight:900}
+.sxf{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:6px;padding-top:6px;border-top:1px solid var(--line);color:var(--mut);font-size:12px}
+.sxf[hidden]{display:none}
+.sxc{padding:3px 10px;font-size:12px}
+.sxc:disabled{opacity:.45;cursor:not-allowed}
+
+/* Ventana del requerimiento: ocupa toda la pantalla (no se ve nada detrás) */
+#dlg{width:100vw!important;max-width:100vw!important;height:100vh;height:100dvh;max-height:100vh!important;max-height:100dvh!important;margin:0;border:0;border-radius:0}
+#dlg[open]{display:flex}
+#dlg>.rform{display:flex;flex-direction:column;flex:1;min-width:0;height:100%;max-height:100%}
+#dlg .rform header,#dlg .rform footer{flex:none}
+#dlg .rgrid{flex:1 1 auto;min-height:0;max-height:none!important;grid-template-columns:minmax(0,2.8fr) minmax(280px,1fr);align-content:start;padding:18px 24px}
+#dlg::backdrop{background:var(--bg,#05080f)}
