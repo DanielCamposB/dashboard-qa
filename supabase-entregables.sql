@@ -7,10 +7,13 @@
 --   · Quitar archivos: solo editores y administradores.
 -- Los archivos viven en un almacenamiento PRIVADO (no hay enlaces públicos): se descargan con un enlace temporal de 2 minutos.
 
--- 1) Almacenamiento privado, máximo 20 MB por archivo
+-- IMPORTANTE: el límite por archivo del bucket no puede superar el límite global del proyecto. En el plan gratuito el máximo es 50 MB
+-- (Supabase → Storage → Settings → «Upload file size limit»). Para subir videos más pesados hace falta el plan Pro o un servidor propio.
+
+-- 1) Almacenamiento privado, máximo 50 MB por archivo
 insert into storage.buckets (id, name, public, file_size_limit)
-values ('entregables', 'entregables', false, 20971520)
-on conflict (id) do update set public = false, file_size_limit = 20971520;
+values ('entregables', 'entregables', false, 52428800)
+on conflict (id) do update set public = false, file_size_limit = 52428800;
 
 -- 2) Permisos sobre los archivos
 drop policy if exists "entregables leen"   on storage.objects;
@@ -44,7 +47,7 @@ begin
     di := jsonb_array_length(st->'reqs'->ri->'deliverables') - 1;
   end if;
   n := coalesce(jsonb_array_length(st->'reqs'->ri->'deliverables'->di->'files'), 0);
-  if n >= 5 then raise exception 'Cada entregable admite hasta 5 archivos'; end if;
+  if n >= 20 then raise exception 'Cada entregable admite hasta 20 archivos'; end if;
   f := jsonb_build_object('id', left(coalesce(nullif(p_file->>'id', ''), md5(random()::text)), 40),
         'name', left(coalesce(nullif(trim(p_file->>'name'), ''), 'archivo'), 200),
         'size', coalesce((p_file->>'size')::bigint, 0), 'type', left(coalesce(p_file->>'type', ''), 100),

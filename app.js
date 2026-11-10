@@ -903,9 +903,9 @@
   }
   const DEL_ST = { pendiente: "Pendiente", entregado: "Entregado", validado: "Validado" };
   // ---- archivos adjuntos de los entregables ----
-  const BAD_EXT = /\.(exe|bat|cmd|com|msi|scr|pif|js|jse|vbs|vbe|wsf|ps1|jar|dll|lnk|hta|sh|apk|reg)$/i, MAX_FILE = 20 * 1024 * 1024, MAX_FILES = 5;
+  const BAD_EXT = /\.(exe|bat|cmd|com|msi|scr|pif|js|jse|vbs|vbe|wsf|ps1|jar|dll|lnk|hta|sh|apk|reg)$/i, MAX_FILE = ((window.QA_CONFIG || {}).maxFileMB || 50) * 1024 * 1024, MAX_FILES = (window.QA_CONFIG || {}).maxFilesPerDeliverable || 20;
   let rmQueue = [];                                           // archivos de entregables eliminados: se borran del almacenamiento al guardar
-  const fsize = n => (n >= 1048576 ? (n / 1048576).toFixed(1).replace(".", ",") + " MB" : Math.max(1, Math.round(n / 1024)) + " KB");
+  const fsize = n => (n >= 1048576 ? (n / 1048576).toFixed(1).replace(/[.,]0$/, "").replace(".", ",") + " MB" : Math.max(1, Math.round(n / 1024)) + " KB");
   const cantWrite = () => D.remote && boot.forceRead === true;   // lector: no escribe en los datos; adjunta mediante una función del servidor
   const snapApply = fn => { try { const o = JSON.parse(openSnap); fn(o); openSnap = JSON.stringify(o); } catch {} };   // el cambio ya quedó guardado: no cuenta como "sin guardar"
   const applyFile = (r, dc, meta) => {
@@ -914,7 +914,7 @@
     delete d._tmp; d.files ||= []; if (!d.files.some(x => x.id === meta.id)) d.files.push(meta);
     r.lastUpdate = meta.at;
   };
-  const fileCell = (d, i) => `<div class="fcell"><button type="button" class="ghost fatt" data-fatt="${i}" title="Adjuntar un archivo, imagen o .zip (máx. 20 MB)">📎 Adjuntar</button>` + (d.files || []).map((f, k) =>
+  const fileCell = (d, i) => `<div class="fcell"><button type="button" class="ghost fatt" data-fatt="${i}" title="Adjuntar fotos, videos, .zip u otros archivos (hasta ${MAX_FILES} por entregable, máx. ${fsize(MAX_FILE)} cada uno)">📎 Adjuntar</button>` + (d.files || []).map((f, k) =>
     `<span class="fchip" data-fi="${i}.${k}"><button type="button" class="fdl" data-fdl="${i}.${k}" aria-label="Descargar ${esc(f.name)}. ${fsize(f.size || 0)}, adjuntado el ${fd((f.at || "").slice(0, 10))}${f.by ? " por " + esc(f.by) : ""}"><span class="fic" aria-hidden="true">${fIcon(f)}</span><span class="fn">${esc(f.name)}</span></button>${readOnly ? "" : `<button type="button" class="fx" data-frm="${i}.${k}" title="Quitar archivo" aria-label="Quitar el archivo ${esc(f.name)}">✕</button>`}</span>`).join("") + "</div>";
   // icono según el tipo de archivo y recuadro con el detalle al pasar el mouse
   const fIcon = f => { const n = String(f.name || "").toLowerCase(), t = f.type || ""; return t.startsWith("image/") ? "🖼️" : /\.(zip|rar|7z|gz|tar)$/.test(n) ? "🗜️" : /\.pdf$/.test(n) ? "📕" : /\.(xls|xlsx|csv)$/.test(n) ? "📊" : /\.(ppt|pptx)$/.test(n) ? "📽️" : /\.(doc|docx|txt|rtf|md)$/.test(n) ? "📝" : "📄"; };
@@ -929,7 +929,7 @@
     g.style.left = Math.max(8, Math.min(r.left, innerWidth - w - 12)) + "px"; g.style.top = Math.max(8, y) + "px";
   }
   function renderDel() {
-    const t = $("#delTbl");
+    const t = $("#delTbl"); const al = $("#attLimits"); if (al) al.textContent = `hasta ${MAX_FILES} archivos por entregable, máximo ${fsize(MAX_FILE)} cada uno`;
     t.innerHTML = `<thead><tr><th>Entregable</th><th>Vence</th><th>Estado</th><th>Enlace (SharePoint / DevOps)</th><th>Archivos adjuntos</th><th></th></tr></thead><tbody>` +
       draft.deliverables.map((d, i) => `<tr><td><textarea class="grow" rows="1" data-di="${i}" data-df="name" maxlength="200">${esc(d.name)}</textarea></td><td><input type="date" data-di="${i}" data-df="due" value="${d.due || ""}"></td>
         <td><select data-di="${i}" data-df="state">${Object.entries(DEL_ST).map(([k, v]) => `<option value="${k}"${k === d.state ? " selected" : ""}>${v}</option>`).join("")}</select></td>
@@ -970,31 +970,44 @@
       renderDel(); say("Archivo quitado ✓");
     }));
   }
+  let attaching = false;
   function attachFile(i) {
     const d = draft.deliverables[i]; if (!d) return;
     if (isNew) return say("Primero guarda el requerimiento; después podrás adjuntar archivos a sus entregables.", 1);
-    if ((d.files || []).length >= MAX_FILES) return say(`Cada entregable admite hasta ${MAX_FILES} archivos.`, 1);
-    const inp = document.createElement("input"); inp.type = "file";
+    if (attaching) return say("Ya hay archivos subiéndose; espera a que termine.", 1);
+    const room = MAX_FILES - (d.files || []).length;
+    if (room <= 0) return say(`Este entregable ya tiene el máximo de ${MAX_FILES} archivos. Quita alguno o comprime las evidencias en un .zip.`, 1);
+    const inp = document.createElement("input"); inp.type = "file"; inp.multiple = true;      // se pueden elegir varios a la vez (fotos y videos)
     inp.onchange = async () => {
-      const file = inp.files[0]; if (!file) return;
-      if (BAD_EXT.test(file.name)) return say("Por seguridad no se permiten archivos ejecutables ni scripts (.exe, .bat, .js, .ps1, etc.).", 1);
-      if (!file.size) return say("El archivo está vacío.", 1);
-      if (file.size > MAX_FILE) return say(`El archivo pesa ${fsize(file.size)}; el máximo es 20 MB.`, 1);
+      let files = [...inp.files]; if (!files.length) return;
+      if (files.length > room) { say(`Solo caben ${room} archivo(s) más en este entregable (máximo ${MAX_FILES}); se subirán los primeros ${room}.`, 1); files = files.slice(0, room); }
       let by = lsGet("qa-author", ""); if (!by) { by = (await askText("¿Con qué nombre quieres firmar lo que adjuntas?", "", { title: "Tu nombre", placeholder: "Nombre y apellido" })) || "Anónimo"; lsSet("qa-author", by); }
-      const fid = uid(), safe = file.name.replace(/[^A-Za-z0-9._-]+/g, "_").slice(-80), rid = draft.id, did = d.id, path = `${rid}/${did}/${fid}-${safe}`;
-      const meta = { id: fid, name: file.name.slice(0, 200), size: file.size, type: file.type || "", path, at: new Date().toISOString(), by, byEmail: boot.user || "" };
-      const dc = { id: did, name: String(d.name || "Entregable").slice(0, 200), due: d.due || "", state: d.state || "pendiente", url: "" };
-      say(`Subiendo «${meta.name}»…`);
+      const rid = draft.id, did = d.id, dc = { id: did, name: String(d.name || "Entregable").slice(0, 200), due: d.due || "", state: d.state || "pendiente", url: "" };
+      attaching = true; let ok = 0;
       try {
-        await D.fileUpload(path, file);
-        if (cantWrite()) { try { await D.qaAttach(rid, did, dc.name, dc.due, meta); } catch (er) { D.fileRemove([path]).catch(() => {}); throw er; } applyFile(store.reqs.find(x => x.id === rid), dc, meta); }
-        else commit(s => applyFile(s.reqs.find(x => x.id === rid), dc, meta));
-      } catch (er) {
-        const m = String(er.message || er);
-        return say(/Bucket not found|bucket/i.test(m) || /function .* does not exist|schema cache/i.test(m) ? "Falta ejecutar supabase-entregables.sql en Supabase." : "No se pudo adjuntar: " + m, 1);
-      }
-      if (draft.id === rid) { applyFile(draft, dc, meta); snapApply(r => applyFile(r, dc, meta)); renderDel(); }
-      render(); say(`Archivo adjuntado ✓ («${meta.name}»)`);
+        for (let n = 0; n < files.length; n++) {
+          const file = files[n];
+          if (BAD_EXT.test(file.name)) { say(`«${file.name}»: por seguridad no se permiten ejecutables ni scripts (.exe, .bat, .js, .ps1, etc.).`, 1); continue; }
+          if (!file.size) { say(`«${file.name}» está vacío.`, 1); continue; }
+          if (file.size > MAX_FILE) { say(`«${file.name}» pesa ${fsize(file.size)} y el máximo por archivo es ${fsize(MAX_FILE)}. Comprímelo o súbelo a SharePoint y pega el enlace.`, 1); continue; }
+          const fid = uid(), safe = file.name.replace(/[^A-Za-z0-9._-]+/g, "_").slice(-80), path = `${rid}/${did}/${fid}-${safe}`;
+          const meta = { id: fid, name: file.name.slice(0, 200), size: file.size, type: file.type || "", path, at: new Date().toISOString(), by, byEmail: boot.user || "" };
+          say(`Subiendo ${n + 1} de ${files.length}: «${meta.name}» (${fsize(file.size)})…`);
+          try {
+            await D.fileUpload(path, file);
+            if (cantWrite()) { try { await D.qaAttach(rid, did, dc.name, dc.due, meta); } catch (er) { D.fileRemove([path]).catch(() => {}); throw er; } applyFile(store.reqs.find(x => x.id === rid), dc, meta); }
+            else commit(s => applyFile(s.reqs.find(x => x.id === rid), dc, meta));
+          } catch (er) {
+            const m = String(er.message || er);
+            say(/Bucket not found|bucket/i.test(m) && !/exceed|size|large/i.test(m) || /function .* does not exist|schema cache/i.test(m) ? "Falta ejecutar supabase-entregables.sql en Supabase."
+              : /exceed|too large|maximum allowed|413|payload/i.test(m) ? `El servidor rechazó «${meta.name}» por su tamaño. Revisa el límite de archivos del proyecto (Supabase → Storage → Settings).` : `No se pudo adjuntar «${meta.name}»: ` + m, 1);
+            break;
+          }
+          if (draft.id === rid) { applyFile(draft, dc, meta); snapApply(r => applyFile(r, dc, meta)); renderDel(); }
+          ok++;
+        }
+      } finally { attaching = false; }
+      if (ok) { render(); say(ok === 1 ? "Archivo adjuntado ✓" : `${ok} archivos adjuntados ✓`); }
     };
     inp.click();
   }

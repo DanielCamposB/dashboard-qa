@@ -33,6 +33,10 @@
     supabaseKey: ENVS[env].supabaseKey,
 
     // Planner (Microsoft Graph, solo lectura). Se llenan al registrar la aplicación en Entra ID (ver README, sección Planner).
+    // Archivos adjuntos de los entregables. El máximo por archivo no puede superar el límite de Storage del proyecto Supabase (50 MB en el plan gratuito).
+    maxFileMB: 50,
+    maxFilesPerDeliverable: 20,
+
     msalClientId: "",
     msalTenantId: ""
   };
