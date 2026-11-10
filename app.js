@@ -7,6 +7,7 @@
   const fd = s => (/^\d{4}-\d{2}-\d{2}$/.test(s || "") ? `${s.slice(8)}-${s.slice(5, 7)}-${s.slice(0, 4)}` : s || "");   // fechas en pantalla: dd-mm-aaaa
   const yearsFrom = k => { const d = new Date(today + "T00:00:00Z"); d.setUTCFullYear(d.getUTCFullYear() + k); return d.toISOString().slice(0, 10); };
   const DATE_MIN = yearsFrom(-10), DATE_MAX = yearsFrom(10), DATE_ERR = "Error: fecha fuera de rango";   // todas las fechas: 10 años atrás y 10 hacia adelante
+  const BIRTH_MIN = "1900-01-01";   // cumpleaños: año de 4 dígitos, desde 1900 hasta hoy
   const badDate = v => !!v && (v < DATE_MIN || v > DATE_MAX);
   const n2d = n => new Date(n * DAY).toISOString().slice(0, 10);
   const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -338,7 +339,8 @@
     e.preventDefault(); const f = e.target, err = $("#pErr"); err.hidden = true;
     if (!f.nombres.value.trim()) { err.textContent = "Escribe tus nombres."; err.hidden = false; return; }
     if (!f.apellido_paterno.value.trim()) { err.textContent = "Escribe tu apellido paterno."; err.hidden = false; return; }
-    if (f.cumpleanos.value && f.cumpleanos.value > today) { err.textContent = "La fecha de cumpleaños no puede ser futura."; err.hidden = false; return; }
+    f.cumpleanos.classList.remove("bad");
+    if (f.cumpleanos.value && (f.cumpleanos.value > today || f.cumpleanos.value < BIRTH_MIN || !/^\d{4}-\d{2}-\d{2}$/.test(f.cumpleanos.value))) { f.cumpleanos.classList.add("bad"); f.cumpleanos.focus(); err.textContent = f.cumpleanos.value > today ? "La fecha de cumpleaños no puede ser futura." : "Fecha de cumpleaños inválida: usa el formato dd-mm-aaaa con un año de 4 dígitos (desde " + fd(BIRTH_MIN) + ")."; err.hidden = false; return; }
     const btn = $("#pSave"); btn.disabled = true;
     try {
       await D.saveProfile(Object.fromEntries(["nombres", "apellido_paterno", "apellido_materno", "cargo", "vertical", "cumpleanos", "telefono"].map(k => [k, f[k].value])));
@@ -588,12 +590,22 @@
     g.className = "gantt" + (readOnly ? " read" : "");
     if (!list.length) { g.innerHTML = `<p class="muted" style="padding:20px">Sin requerimientos para mostrar.</p>`; return; }
     const all = list.flatMap(r => span(r)).map(d2n);
-    const min = Math.min(...all, d2n(today)) - 5, max = Math.max(...all, d2n(today)) + 15, W = (max - min + 1) * pxDay, x = n => (n - min) * pxDay;
+    const min = Math.min(...all, d2n(today)) - 5;
+    const last = new Date(Math.max(...all, d2n(today)) * DAY);
+    const max = Math.round(Date.UTC(last.getUTCFullYear(), last.getUTCMonth() + 2, 0) / DAY);   // hasta fin del mes siguiente al del último término (1 mes de margen): si termina el 31-dic, se ve hasta enero
+    const W = (max - min + 1) * pxDay, x = n => (n - min) * pxDay;
     let ticks = "";
+    // meses: un segmento continuo por mes (el nombre se recorta dentro de su propio ancho, nunca se monta con el siguiente)
+    for (let n = min; n <= max;) {
+      const d = new Date(n * DAY), nxt = Math.min(max + 1, Math.round(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1) / DAY)), w = (nxt - n) * pxDay;
+      const lbl = w < 26 ? "" : d.toLocaleDateString("es", w < 70 ? { month: "short", timeZone: "UTC" } : { month: "short", year: "2-digit", timeZone: "UTC" });
+      ticks += `<div class="g-tick m g-seg" style="left:${x(n)}px;width:${w}px" title="${esc(d.toLocaleDateString("es", { month: "long", year: "numeric", timeZone: "UTC" }))}">${esc(lbl)}</div>`;
+      n = nxt;
+    }
+    // días: todos si hay espacio; si no, cada lunes (semana continua). Nunca se omiten semanas intermedias.
     for (let n = min; n <= max; n++) {
       const d = new Date(n * DAY), dd = d.getUTCDate();
-      if (dd === 1 || n === min) ticks += `<div class="g-tick m" style="left:${x(n)}px">${d.toLocaleDateString("es", { month: "short", year: "2-digit", timeZone: "UTC" })}</div>`;
-      if (pxDay >= 28 || (pxDay >= 10 && d.getUTCDay() === 1)) ticks += `<div class="g-tick d" style="left:${x(n)}px">${dd}</div>`;
+      if (pxDay >= 28 || (pxDay >= 4 && d.getUTCDay() === 1)) ticks += `<div class="g-tick d" style="left:${x(n)}px">${dd}</div>`;
     }
     const bar = (kind, id, obj, st, label, pct, drag) => {
       const s = d2n(obj.start), e = Math.max(d2n(obj.end), s);
@@ -1184,7 +1196,8 @@
     const list = (pick || visible()).slice().sort((x, y) => clientName(x.clientId).localeCompare(clientName(y.clientId)) || x.code.localeCompare(y.code));
     if (!list.length) return null;
     const all = list.flatMap(r => span(r)).concat(today).map(d2n);
-    let min = Math.min(...all) - 1, max = Math.max(...all) + 3;
+    const lastD = new Date(Math.max(...all) * DAY);
+    let min = Math.min(...all) - 1, max = Math.round(Date.UTC(lastD.getUTCFullYear(), lastD.getUTCMonth() + 2, 0) / DAY);   // hasta fin del mes siguiente al último término
     const weekly = max - min > 100;
     if (weekly) min -= (new Date(min * DAY).getUTCDay() + 6) % 7;            // lunes
     const step = weekly ? 7 : 1, cols = [];
@@ -1314,7 +1327,9 @@
   $("#newComment").addEventListener("input", syncCm); syncCm();
   const checkDate = el => { if (el.type === "date" && el.name !== "cumpleanos") { if (badDate(el.value)) fieldErr(el, DATE_ERR, true); else fieldErr(el, ""); } };
   ["input", "change", "focusout"].forEach(t => document.addEventListener(t, e => checkDate(e.target), true));
-  const boundDates = () => document.querySelectorAll('input[type="date"]').forEach(el => { if (el.name !== "cumpleanos") { el.min = DATE_MIN; el.max = DATE_MAX; } });
+  const boundDates = () => document.querySelectorAll('input[type="date"]').forEach(el => { if (el.name === "cumpleanos") { el.min = BIRTH_MIN; el.max = today; } else { el.min = DATE_MIN; el.max = DATE_MAX; } });
+  // los campos de fecha aceptan años de hasta 6 dígitos (p. ej. 666666): se rechaza el 5.º dígito del año
+  document.addEventListener("input", e => { const el = e.target; if (el.type !== "date") return; if (/^\d{5,}-/.test(el.value)) el.value = el.dataset.okv || ""; else el.dataset.okv = el.value; }, true);
   boundDates(); new MutationObserver(() => boundDates()).observe(document.body, { childList: true, subtree: true });
   $("#rform").onsubmit = submitReq;
   // campos inválidos (p. ej. Código/Título vacío, enlace mal escrito) bloquean el envío sin avisar si quedan fuera de vista
@@ -1337,6 +1352,12 @@
   D.onError = m => say(m, 1);
   D.onRemoteChange = s => { store = s; if (!$("#dlg").open) render(); };
   $("#pform").onsubmit = submitProfile;
+  // fecha de cumpleaños fuera de rango: el aviso sale en el propio formulario y el campo se marca en rojo
+  $("#pform").addEventListener("invalid", ev => {
+    ev.preventDefault(); const el = ev.target, err = $("#pErr"); el.classList.add("bad");
+    err.textContent = el.name === "cumpleanos" ? "Fecha de cumpleaños inválida: usa el formato dd-mm-aaaa, con un año de 4 dígitos entre " + fd(BIRTH_MIN) + " y hoy." : el.validationMessage; err.hidden = false;
+  }, true);
+  $("#pform").addEventListener("input", ev => { ev.target.classList?.remove("bad"); $("#pErr").hidden = true; });
   $("#cpSave").onclick = changePw; $("#cpNew").addEventListener("input", updCpRules);
   $("#pAccount").querySelectorAll(".eye").forEach(b => (b.onclick = () => { const i = b.previousElementSibling; i.type = i.type === "password" ? "text" : "password"; const on = i.type === "text"; b.classList.toggle("on", on); b.setAttribute("aria-pressed", String(on)); b.setAttribute("aria-label", on ? "Ocultar contraseña" : "Mostrar contraseña"); }));
   $("#pClose").onclick = $("#pCancel").onclick = () => $("#pdlg").close();

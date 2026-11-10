@@ -755,3 +755,7 @@ button,select,input,summary,label,a,.qhint{touch-action:manipulation}           
 .bar.sum{top:9px!important;height:12px!important;opacity:.9}
 .bar.st-Bloqueado{background:#e0a400;color:#1a1200}
 .bar.st-Bloqueado .fill{background:rgba(0,0,0,.22)}
+
+/* Carta Gantt: meses como segmentos continuos (sin solaparse) y días/semanas a lo largo de toda la escala */
+.g-head .g-tick.g-seg{overflow:hidden;text-overflow:ellipsis;box-sizing:border-box;border-left:1px solid var(--line);background:color-mix(in srgb,var(--line) 35%,transparent)}
+.g-head .g-tick.d{font-size:10px;padding:2px 2px}
