@@ -20,7 +20,7 @@ create policy "editar mi perfil" on profiles for update to authenticated
   using (email = lower(auth.jwt() ->> 'email'))
   with check (email = lower(auth.jwt() ->> 'email'));
 
--- Los editores pueden ver los perfiles de todos (directorio del equipo)
+-- Los editores y los administradores pueden ver los perfiles de todos (directorio del equipo y pestaña Permisos)
 drop policy if exists "editores ven perfiles" on profiles;
 create policy "editores ven perfiles" on profiles for select to authenticated
-  using (public.my_role() = 'editor');
+  using (public.my_role() in ('editor','admin'));

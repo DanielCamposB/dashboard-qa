@@ -63,7 +63,7 @@
     const kp = [["Requerimientos", total, NAVY], ["Completados", byS.Completado || 0, ST.Completado.fg], ["En curso", byS["En curso"] || 0, ST["En curso"].fg], ["Pendientes", byS.Pendiente || 0, ST.Pendiente.fg], ["Bloqueados", byS.Bloqueado || 0, ST.Bloqueado.fg], ["Atrasados", byS.Atrasado || 0, ST.Atrasado.fg], ["Avance promedio", avg + "%", NAVY], ["Entregables vencidos", delOv, delOv ? ST.Atrasado.fg : NAVY]];
     const kw = 1800;
     kids.push(table(kp.map(() => kw), [new TableRow({ cantSplit: true, children: kp.map(([l, v, c]) => cell([para(v, { size: 40, bold: true, color: c, align: AlignmentType.CENTER, after: 0 }), para(l, { size: 16, color: "5B6478", align: AlignmentType.CENTER, after: 0 })], kw, { fill: "F4F6FA" })) })]));
-    kids.push(para(`Del conjunto seleccionado, ${byS.Completado || 0} de ${total} están completados y el avance promedio es ${avg}%. ${byS.Atrasado ? byS.Atrasado + " requerimiento(s) están atrasados" : "Ningún requerimiento está atrasado"}${byS.Bloqueado ? " y " + byS.Bloqueado + " bloqueado(s)" : ""}${dels.length ? `; ${dels.filter(x => x.state !== "pendiente").length} de ${dels.length} entregables ya fueron entregados` : ""}.`, { before: 140, after: 100 }));
+    kids.push(para(`Del conjunto seleccionado, ${byS.Completado || 0} de ${total} están completados y el avance promedio es ${avg}%. ${byS.Atrasado ? byS.Atrasado + " requerimiento(s) están atrasados" : "Ningún requerimiento está atrasado"}${byS.Bloqueado ? " y " + byS.Bloqueado + " bloqueado(s)" : ""}${dels.length ? `; ${dels.filter(x => x.state !== "pendiente").length} de ${dels.length} entregables ya fueron entregados, ${dels.filter(x => (x.files || []).length).length} con archivos adjuntos` : ""}.`, { before: 140, after: 100 }));
     kids.push(h("Puntos de atención", HeadingLevel.HEADING_3, { before: 120 }));
     if (attention.length) attention.slice(0, 12).forEach(r => {
       const bl = (r.acts || []).filter(a => a.blocked).map(a => a.blockReason || a.name).filter(Boolean).join("; ");
@@ -108,9 +108,9 @@
       // entregables
       if ((r.deliverables || []).length) {
         kids.push(h(`Entregables (${r.deliverables.length})`, HeadingLevel.HEADING_3));
-        const dw = [6000, 2000, 2200, 4200], dst = x => (x.state === "pendiente" ? (x.due && x.due < today ? "Vencido" : "Pendiente") : x.state === "validado" ? "Validado" : "Entregado");
-        kids.push(table(dw, [head(dw, ["Entregable", "Fecha comprometida", "Estado", "Enlace"]),
-          ...r.deliverables.map(x => { const t = dst(x); return new TableRow({ cantSplit: true, children: [cell(x.name, dw[0], { size: 18, bold: true }), cell(fmt(x.due), dw[1], { size: 18 }), cell(t, dw[2], { size: 18, bold: true, align: AlignmentType.CENTER, fill: t === "Vencido" ? ST.Atrasado.bg : t === "Pendiente" ? ST.Pendiente.bg : ST.Completado.bg, color: t === "Vencido" ? ST.Atrasado.fg : t === "Pendiente" ? ST.Pendiente.fg : ST.Completado.fg }), cell(x.url || "—", dw[3], { size: 16 })] }); })]));
+        const dw = [5200, 1800, 1900, 4200, 1300], dst = x => (x.state === "pendiente" ? (x.due && x.due < today ? "Vencido" : "Pendiente") : x.state === "validado" ? "Validado" : "Entregado");
+        kids.push(table(dw, [head(dw, ["Entregable", "Fecha comprometida", "Estado", "Enlace", "Adjunto"]),
+          ...r.deliverables.map(x => { const t = dst(x); return new TableRow({ cantSplit: true, children: [cell(x.name, dw[0], { size: 18, bold: true }), cell(fmt(x.due), dw[1], { size: 18 }), cell(t, dw[2], { size: 18, bold: true, align: AlignmentType.CENTER, fill: t === "Vencido" ? ST.Atrasado.bg : t === "Pendiente" ? ST.Pendiente.bg : ST.Completado.bg, color: t === "Vencido" ? ST.Atrasado.fg : t === "Pendiente" ? ST.Pendiente.fg : ST.Completado.fg }), cell(x.url || "—", dw[3], { size: 16 }), (x.files || []).length ? cell("Sí", dw[4], { size: 18, bold: true, align: AlignmentType.CENTER, fill: ST.Completado.bg, color: ST.Completado.fg }) : cell("No", dw[4], { size: 18, bold: true, align: AlignmentType.CENTER, color: "5B6478" })] }); })]));
       }
 
       // métricas de calidad
@@ -126,7 +126,7 @@
       const cm = (r.comments || []).slice().sort((x, y) => (x.at < y.at ? 1 : -1)).slice(0, 5);
       if (cm.length) {
         kids.push(h("Últimos comentarios", HeadingLevel.HEADING_3));
-        cm.forEach(c => kids.push(para([run(`${fmt(c.at)} · ${c.by || "—"}: `, { bold: true, size: 18 }), run(String(c.text || "").slice(0, 500), { size: 18 })], { bullet: { level: 0 }, after: 40 })));
+        cm.forEach(c => kids.push(para([run(`${fmt(c.at)} · ${c.by || "—"}: `, { bold: true, size: 18 }), run(String(c.text || "").slice(0, 500) + (c.editedAt ? " (editado)" : ""), { size: 18 })], { bullet: { level: 0 }, after: 40 })));
       }
     });
 

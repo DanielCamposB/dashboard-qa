@@ -199,6 +199,28 @@
   D.qaComment = (rid, c) => rpc("qa_comment", { p_req: rid, p_id: c.id, p_by: c.by, p_text: c.text });
   D.qaCommentEdit = (rid, id, by, text) => rpc("qa_comment_edit", { p_req: rid, p_id: id, p_by: by, p_text: text });
   D.logout = async () => { await sb.auth.signOut(); location.reload(); };
+
+  // ---------- Archivos adjuntos de los entregables ----------
+  // Con Supabase: bucket privado «entregables» (se descarga con un enlace temporal). Sin Supabase: IndexedDB del navegador.
+  const BUCKET = "entregables";
+  const idb = () => new Promise((ok, no) => { const q = indexedDB.open("qa-files", 1); q.onupgradeneeded = () => q.result.createObjectStore("f"); q.onsuccess = () => ok(q.result); q.onerror = () => no(q.error); });
+  const idbDo = (mode, fn) => idb().then(db => new Promise((ok, no) => { const t = db.transaction("f", mode), r = fn(t.objectStore("f")); t.oncomplete = () => ok(r.result); t.onerror = () => no(t.error); }));
+  D.fileUpload = async (path, file) => {
+    if (!remote) return idbDo("readwrite", s => s.put(file, path));
+    const { error } = await sb.storage.from(BUCKET).upload(path, file, { contentType: file.type || "application/octet-stream", upsert: false });
+    if (error) throw error;
+  };
+  D.fileUrl = async (path, name) => {
+    if (!remote) { const b = await idbDo("readonly", s => s.get(path)); if (!b) throw new Error("el archivo no está en este navegador"); return URL.createObjectURL(b); }
+    const { data, error } = await sb.storage.from(BUCKET).createSignedUrl(path, 120, { download: name || true });
+    if (error) throw error; return data.signedUrl;
+  };
+  D.fileRemove = async paths => {
+    if (!paths || !paths.length) return;
+    if (!remote) { await Promise.all(paths.map(p => idbDo("readwrite", s => s.delete(p)))); return; }
+    const { error } = await sb.storage.from(BUCKET).remove(paths); if (error) throw error;
+  };
+  D.qaAttach = (rid, did, name, due, f) => rpc("qa_attach", { p_req: rid, p_deliv: did, p_name: name || "", p_due: due || "", p_file: f });
   D.exportJson = function (store) {
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([JSON.stringify(store, null, 2)], { type: "application/json" }));

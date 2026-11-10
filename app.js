@@ -839,7 +839,7 @@
   let openSnap = "";
   const dirtyReq = () => { if (readOnly) return false; try { readForm(); } catch {} return JSON.stringify(draft) !== openSnap; };
   function openReq(id) {
-    isNew = !id; threadAll = false; editCm = null; histCm.clear();
+    isNew = !id; threadAll = false; editCm = null; histCm.clear(); rmQueue = [];
     draft = id ? JSON.parse(JSON.stringify(store.reqs.find(r => r.id === id)))
       : { id: uid(), clientId: clientId !== "all" ? clientId : (store.clients[0]?.id || ""), code: "", title: "", type: "trad", assigneeId: "", assigneeIds: [], leaderIds: [], status: "Pendiente", percent: 0, start: today, end: today, acts: [], comments: [] };
     if (isNew) draft.acts = fromTemplate(today);
@@ -895,19 +895,108 @@
       const det = cb.closest("details"), l = [...det.querySelectorAll("[data-ai]:checked")].map(x => x.value);
       setIds(draft.acts[+cb.dataset.ai], l); det.querySelector("summary").innerHTML = l.length ? chips(l.map(mname)) : "Sin asignar";
     }));
-    $("#actTbl").querySelectorAll("[data-rm]").forEach(b => (b.onclick = () => { draft.acts.splice(+b.dataset.rm, 1); renderActs(); }));
+    $("#actTbl").querySelectorAll("[data-rm]").forEach(b => (b.onclick = async () => {
+      const a = draft.acts[+b.dataset.rm]; if (!a) return;
+      if (!await ask(`¿Quieres eliminar la actividad «${String(a.name || "sin nombre").slice(0, 80)}»?`, { title: "Eliminar actividad", ok: "Sí", cancel: "No", danger: true })) return;
+      draft.acts.splice(+b.dataset.rm, 1); renderActs();
+    }));
   }
   const DEL_ST = { pendiente: "Pendiente", entregado: "Entregado", validado: "Validado" };
+  // ---- archivos adjuntos de los entregables ----
+  const BAD_EXT = /\.(exe|bat|cmd|com|msi|scr|pif|js|jse|vbs|vbe|wsf|ps1|jar|dll|lnk|hta|sh|apk|reg)$/i, MAX_FILE = 20 * 1024 * 1024, MAX_FILES = 5;
+  let rmQueue = [];                                           // archivos de entregables eliminados: se borran del almacenamiento al guardar
+  const fsize = n => (n >= 1048576 ? (n / 1048576).toFixed(1).replace(".", ",") + " MB" : Math.max(1, Math.round(n / 1024)) + " KB");
+  const cantWrite = () => D.remote && boot.forceRead === true;   // lector: no escribe en los datos; adjunta mediante una función del servidor
+  const snapApply = fn => { try { const o = JSON.parse(openSnap); fn(o); openSnap = JSON.stringify(o); } catch {} };   // el cambio ya quedó guardado: no cuenta como "sin guardar"
+  const applyFile = (r, dc, meta) => {
+    if (!r) return; r.deliverables ||= [];
+    let d = r.deliverables.find(x => x.id === dc.id); if (!d) { d = { ...dc }; r.deliverables.push(d); }
+    delete d._tmp; d.files ||= []; if (!d.files.some(x => x.id === meta.id)) d.files.push(meta);
+    r.lastUpdate = meta.at;
+  };
+  const fileCell = (d, i) => `<div class="fcell"><button type="button" class="ghost fatt" data-fatt="${i}" title="Adjuntar un archivo, imagen o .zip (máx. 20 MB)">📎 Adjuntar</button>` + (d.files || []).map((f, k) =>
+    `<span class="fchip" data-fi="${i}.${k}"><button type="button" class="fdl" data-fdl="${i}.${k}" aria-label="Descargar ${esc(f.name)}. ${fsize(f.size || 0)}, adjuntado el ${fd((f.at || "").slice(0, 10))}${f.by ? " por " + esc(f.by) : ""}"><span class="fic" aria-hidden="true">${fIcon(f)}</span><span class="fn">${esc(f.name)}</span></button>${readOnly ? "" : `<button type="button" class="fx" data-frm="${i}.${k}" title="Quitar archivo" aria-label="Quitar el archivo ${esc(f.name)}">✕</button>`}</span>`).join("") + "</div>";
+  // icono según el tipo de archivo y recuadro con el detalle al pasar el mouse
+  const fIcon = f => { const n = String(f.name || "").toLowerCase(), t = f.type || ""; return t.startsWith("image/") ? "🖼️" : /\.(zip|rar|7z|gz|tar)$/.test(n) ? "🗜️" : /\.pdf$/.test(n) ? "📕" : /\.(xls|xlsx|csv)$/.test(n) ? "📊" : /\.(ppt|pptx)$/.test(n) ? "📽️" : /\.(doc|docx|txt|rtf|md)$/.test(n) ? "📝" : "📄"; };
+  const hideFtip = () => { const g = $("#ftip"); if (g) g.hidden = true; };
+  function showFtip(el, f) {
+    if (!f) return;
+    let g = $("#ftip"); if (!g) { g = document.createElement("div"); g.id = "ftip"; g.setAttribute("role", "tooltip"); $("#dlg").appendChild(g); }
+    g.innerHTML = `<b>${esc(f.name)}</b><span>Tamaño: ${fsize(f.size || 0)}</span><span>Adjuntado el ${f.at ? fdt(f.at) : "—"}</span><span>Por: ${esc(f.by || "—")}${f.byEmail ? " (" + esc(f.byEmail) + ")" : ""}</span><em>Haz clic para descargar</em>`;
+    g.hidden = false;
+    const r = el.getBoundingClientRect(), w = g.offsetWidth, h = g.offsetHeight;
+    let y = r.bottom + 6; if (y + h > innerHeight - 8) y = r.top - h - 6;
+    g.style.left = Math.max(8, Math.min(r.left, innerWidth - w - 12)) + "px"; g.style.top = Math.max(8, y) + "px";
+  }
   function renderDel() {
     const t = $("#delTbl");
-    t.innerHTML = `<thead><tr><th>Entregable</th><th>Vence</th><th>Estado</th><th>Enlace (SharePoint / DevOps)</th><th></th></tr></thead><tbody>` +
-      draft.deliverables.map((d, i) => `<tr><td><textarea class="grow" rows="1" data-di="${i}" data-df="name">${esc(d.name)}</textarea></td><td><input type="date" data-di="${i}" data-df="due" value="${d.due || ""}"></td>
+    t.innerHTML = `<thead><tr><th>Entregable</th><th>Vence</th><th>Estado</th><th>Enlace (SharePoint / DevOps)</th><th>Archivos adjuntos</th><th></th></tr></thead><tbody>` +
+      draft.deliverables.map((d, i) => `<tr><td><textarea class="grow" rows="1" data-di="${i}" data-df="name" maxlength="200">${esc(d.name)}</textarea></td><td><input type="date" data-di="${i}" data-df="due" value="${d.due || ""}"></td>
         <td><select data-di="${i}" data-df="state">${Object.entries(DEL_ST).map(([k, v]) => `<option value="${k}"${k === d.state ? " selected" : ""}>${v}</option>`).join("")}</select></td>
         <td><input type="url" data-di="${i}" data-df="url" value="${esc(d.url || "")}" placeholder="https://..."></td>
-        <td>${readOnly ? "" : `<button type="button" class="danger" data-drm="${i}">✕</button>`}</td></tr>`).join("") + "</tbody>";
-    autosize(t);
-    t.querySelectorAll("[data-df]").forEach(el => { el.disabled = readOnly; el.onchange = () => { const d = draft.deliverables[+el.dataset.di], f = el.dataset.df; d[f] = el.value; if (f === "state") d.deliveredAt = el.value === "pendiente" ? "" : (d.deliveredAt || today); }; });
-    t.querySelectorAll("[data-drm]").forEach(b => (b.onclick = () => { draft.deliverables.splice(+b.dataset.drm, 1); renderDel(); }));
+        <td>${fileCell(d, i)}</td>
+        <td>${readOnly && !d._tmp ? "" : `<button type="button" class="danger" data-drm="${i}" aria-label="Eliminar entregable">✕</button>`}</td></tr>`).join("") + "</tbody>";
+    autosize(t); hideFtip();
+    t.querySelectorAll(".fchip").forEach(c => {
+      const [i, k] = c.dataset.fi.split(".").map(Number), show = () => showFtip(c, draft.deliverables[i]?.files?.[k]);
+      c.addEventListener("mouseenter", show); c.addEventListener("focusin", show); c.addEventListener("mouseleave", hideFtip); c.addEventListener("focusout", hideFtip);
+    });
+    t.querySelectorAll("[data-df]").forEach(el => { const d0 = draft.deliverables[+el.dataset.di]; el.disabled = readOnly && !(d0._tmp && el.dataset.df === "name"); el.onchange = () => { const d = draft.deliverables[+el.dataset.di], f = el.dataset.df; d[f] = el.value; if (f === "state") d.deliveredAt = el.value === "pendiente" ? "" : (d.deliveredAt || today); }; });
+    t.querySelectorAll("[data-drm]").forEach(b => (b.onclick = async () => {
+      const i = +b.dataset.drm, d = draft.deliverables[i]; if (!d) return;
+      if (!d._tmp) {
+        const n = (d.files || []).length;
+        if (!await ask(`¿Quieres eliminar el entregable «${String(d.name || "sin nombre").slice(0, 80)}»?${n ? ` También se eliminarán sus ${n} archivo(s) adjunto(s).` : ""}`, { title: "Eliminar entregable", ok: "Sí", cancel: "No", danger: true })) return;
+      }
+      (d.files || []).forEach(f => rmQueue.push(f.path)); draft.deliverables.splice(i, 1); renderDel();
+    }));
+    t.querySelectorAll("[data-fatt]").forEach(b => (b.onclick = () => attachFile(+b.dataset.fatt)));
+    t.querySelectorAll("[data-fdl]").forEach(b => (b.onclick = async () => {
+      const [i, k] = b.dataset.fdl.split(".").map(Number), f = draft.deliverables[i]?.files?.[k]; if (!f) return;
+      try {
+        const url = await D.fileUrl(f.path, f.name), a = document.createElement("a");
+        a.href = url; a.download = f.name; a.rel = "noopener"; document.body.appendChild(a); a.click(); a.remove();
+        if (url.startsWith("blob:")) setTimeout(() => URL.revokeObjectURL(url), 60000);
+      } catch (er) { say("No se pudo descargar el archivo: " + errText(er), 1); }
+    }));
+    t.querySelectorAll("[data-frm]").forEach(b => (b.onclick = async () => {
+      if (readOnly) return;
+      const [i, k] = b.dataset.frm.split(".").map(Number), d = draft.deliverables[i], f = d?.files?.[k]; if (!f) return;
+      if (!await ask(`¿Quieres quitar el archivo «${f.name}»? Se elimina de forma definitiva.`, { title: "Quitar archivo", ok: "Sí", cancel: "No", danger: true })) return;
+      try { await D.fileRemove([f.path]); } catch (er) { return say("No se pudo quitar el archivo: " + errText(er), 1); }
+      const did = d.id, rid = draft.id, op = r => { const x = r?.deliverables?.find(q => q.id === did); if (x) x.files = (x.files || []).filter(q => q.id !== f.id); };
+      op(draft); snapApply(op);
+      if (!isNew) { commit(s => op(s.reqs.find(x => x.id === rid))); render(); }
+      renderDel(); say("Archivo quitado ✓");
+    }));
+  }
+  function attachFile(i) {
+    const d = draft.deliverables[i]; if (!d) return;
+    if (isNew) return say("Primero guarda el requerimiento; después podrás adjuntar archivos a sus entregables.", 1);
+    if ((d.files || []).length >= MAX_FILES) return say(`Cada entregable admite hasta ${MAX_FILES} archivos.`, 1);
+    const inp = document.createElement("input"); inp.type = "file";
+    inp.onchange = async () => {
+      const file = inp.files[0]; if (!file) return;
+      if (BAD_EXT.test(file.name)) return say("Por seguridad no se permiten archivos ejecutables ni scripts (.exe, .bat, .js, .ps1, etc.).", 1);
+      if (!file.size) return say("El archivo está vacío.", 1);
+      if (file.size > MAX_FILE) return say(`El archivo pesa ${fsize(file.size)}; el máximo es 20 MB.`, 1);
+      let by = lsGet("qa-author", ""); if (!by) { by = (await askText("¿Con qué nombre quieres firmar lo que adjuntas?", "", { title: "Tu nombre", placeholder: "Nombre y apellido" })) || "Anónimo"; lsSet("qa-author", by); }
+      const fid = uid(), safe = file.name.replace(/[^A-Za-z0-9._-]+/g, "_").slice(-80), rid = draft.id, did = d.id, path = `${rid}/${did}/${fid}-${safe}`;
+      const meta = { id: fid, name: file.name.slice(0, 200), size: file.size, type: file.type || "", path, at: new Date().toISOString(), by, byEmail: boot.user || "" };
+      const dc = { id: did, name: String(d.name || "Entregable").slice(0, 200), due: d.due || "", state: d.state || "pendiente", url: "" };
+      say(`Subiendo «${meta.name}»…`);
+      try {
+        await D.fileUpload(path, file);
+        if (cantWrite()) { try { await D.qaAttach(rid, did, dc.name, dc.due, meta); } catch (er) { D.fileRemove([path]).catch(() => {}); throw er; } applyFile(store.reqs.find(x => x.id === rid), dc, meta); }
+        else commit(s => applyFile(s.reqs.find(x => x.id === rid), dc, meta));
+      } catch (er) {
+        const m = String(er.message || er);
+        return say(/Bucket not found|bucket/i.test(m) || /function .* does not exist|schema cache/i.test(m) ? "Falta ejecutar supabase-entregables.sql en Supabase." : "No se pudo adjuntar: " + m, 1);
+      }
+      if (draft.id === rid) { applyFile(draft, dc, meta); snapApply(r => applyFile(r, dc, meta)); renderDel(); }
+      render(); say(`Archivo adjuntado ✓ («${meta.name}»)`);
+    };
+    inp.click();
   }
   function renderMetrics() {
     const m = draft.metrics;
@@ -1038,9 +1127,11 @@
       const why = await askReason(`${draft.code}: el plazo cambia de ${fd(old.end)} a ${fd(draft.end)}.`); if (why === null) return;
       draft.dateLog = [...draft.dateLog, { at: draft.lastUpdate, by: authorName(), from: old.end, to: draft.end, reason: why }];
     }
+    draft.deliverables = (draft.deliverables || []).filter(d => !d._tmp);
     const i = store.reqs.findIndex(r => r.id === draft.id);
     i < 0 ? store.reqs.push(draft) : (store.reqs[i] = draft);
-    save(); $("#dlg").close(); say("Guardado ✓"); render();
+    save(); if (rmQueue.length) { D.fileRemove(rmQueue).catch(() => {}); rmQueue = []; }
+    $("#dlg").close(); say("Guardado ✓"); render();
   }
 
   // ---------- global ----------
@@ -1274,7 +1365,7 @@
   const download = (blob, name) => { const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); };
   // Informe Word con el resumen de actividades de los requerimientos elegidos (report.js)
   async function exportReport() {
-    const list = await pickReqs({ title: "Descargar resumen de actividades (Word)", ok: "Descargar Word", hint: "Elige uno o varios requerimientos. El documento incluye resumen ejecutivo, y por cada requerimiento sus actividades con responsable, fechas, duración, avance y estado, más entregables, métricas y comentarios." });
+    const list = await pickReqs({ title: "Descargar resumen de actividades (Word)", ok: "Descargar Word", hint: "Elige uno o varios requerimientos. El documento incluye resumen ejecutivo, y por cada requerimiento sus actividades con responsable, fechas, duración, avance y estado, más entregables (con su estado, enlace y si tienen archivo adjunto), métricas y comentarios." });
     if (!list) return;
     const btn = $("#btnReport"); btn.disabled = true; say("Generando el documento…");
     try {
@@ -1424,7 +1515,7 @@
   };
   $("#hoyExpand").onclick = () => setHoyAll(false); $("#hoyCollapse").onclick = () => setHoyAll(true);
   $("#btnActAdd").onclick = () => { const last = draft.acts[draft.acts.length - 1]; const s = last ? addDays(last.end, 1) : today; draft.acts.push({ id: uid(), name: "Nueva actividad", start: s, end: s, percent: 0, assigneeId: draft.assigneeId, assigneeIds: [...ids(draft)], blocked: false }); renderActs(); };
-  $("#btnDelAdd").onclick = () => { draft.deliverables.push({ id: uid(), name: "Nuevo entregable", due: span(draft)[1] || today, state: "pendiente", url: "" }); renderDel(); };
+  $("#btnDelAdd").onclick = () => { draft.deliverables.push({ id: uid(), name: "Nuevo entregable", due: span(draft)[1] || today, state: "pendiente", url: "", ...(readOnly ? { _tmp: true } : {}) }); renderDel(); };
   $("#btnTplNew").onclick = async () => {
     if (readOnly) return;
     const name = ((await askText("Nombre del nuevo tipo de requerimiento (ej: QA Performance, Regresión):", "", { title: "Nuevo tipo" })) || "").trim(); if (!name) return;
