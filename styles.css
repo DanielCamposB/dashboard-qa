@@ -886,3 +886,9 @@ tr[hidden],.ccard[hidden]{display:none!important}
 #ftip b{overflow-wrap:anywhere}
 #ftip em{color:var(--acc);font-size:12px;font-style:normal;font-weight:600}
 #delTbl th:nth-child(1){width:22%}#delTbl th:nth-child(2){width:13%}#delTbl th:nth-child(3){width:11%}#delTbl th:nth-child(4){width:17%}#delTbl th:nth-child(5){width:33%}
+
+/* Ventana del requerimiento: botones del pie centrados y más grandes */
+.rform footer{justify-content:center;gap:16px;padding:16px 18px}
+.rform footer .spacer{display:none}
+.rform footer button{min-width:150px;min-height:46px;padding:11px 30px;font-size:16px;font-weight:700;border-radius:10px}
+@media (max-width:720px){.rform footer{gap:10px;padding:12px}.rform footer button{min-width:0;padding:11px 14px}}
