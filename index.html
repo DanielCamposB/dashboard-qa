@@ -21,6 +21,7 @@
     <button data-v="dash" class="on" aria-current="page">Dashboard</button>
     <button data-v="hoy">Hoy</button>
     <button data-v="resumen">Resumen</button>
+    <button data-v="kpi">KPI / Gráficos</button>
     <button data-v="gantt">Carta Gantt</button>
     <button data-v="team">Equipo</button>
     <button data-v="leaders">Responsables de requerimiento</button>
@@ -145,6 +146,18 @@
   <div class="card"><h2>Requerimientos que necesitan atención</h2><div id="resAtt"></div></div>
 </section>
 
+<section id="v-kpi" class="view" hidden>
+  <div class="toolbar kpiTop"><h2 class="vtitle">KPI / Gráficos</h2><span class="muted">Semáforo: <b class="r">rojo</b> atrasado · <b class="y">ámbar</b> en riesgo (vence hoy, o en 48 h o menos con avance menor a 50 %, o bloqueado) · <b class="g">verde</b> en plazo. Respeta el cliente elegido arriba.</span>
+    <span class="kstamp"><span id="kpiStamp" class="muted"></span><button type="button" id="kpiRefresh" class="ghost">↻ Actualizar</button></span></div>
+  <div class="kcards" id="kpiRow"></div>
+  <div class="kgrid2">
+    <div class="card"><h2>Vencimientos de la semana</h2><p class="muted kn">Requerimientos abiertos según el día en que vencen.</p><div id="kpiWeek"></div></div>
+    <div class="card"><h2>Carga por responsable</h2><p class="muted kn">Requerimientos abiertos por persona, según su estado.</p><div id="kpiLoad"></div></div>
+    <div class="card"><h2>Tendencia de 30 días</h2><p class="muted kn">¿El backlog crece o baja? Abiertos contra cerrados.</p><div id="kpiTrend"></div></div>
+    <div class="card"><h2>Antigüedad del backlog</h2><p class="muted kn">Cuánto llevan abiertos los requerimientos.</p><div id="kpiAge"></div></div>
+  </div>
+  <div class="card" id="kpiListCard"><h2>Requieren atención ahora</h2><div id="kpiFilt" class="kfilt"></div><div class="tablewrap kwrap"><table id="kpiTbl"></table></div></div>
+</section>
 <section id="v-gantt" class="view" hidden>
   <div class="toolbar gtoolbar">
     <span class="muted gdesc">Muestra los requerimientos que dejes filtrados en la solapa Dashboard: cualquier filtro que apliques allá (tipo, rol, equipo, estado, prioridad, etapa o texto) se refleja aquí. Pasa el mouse por una barra para ver su detalle y haz clic para editar sus fechas.</span>
@@ -341,16 +354,17 @@
     <div class="rgrid">
       <div class="col">
         <p class="hint reqnote"><span class="star">*</span> Campo obligatorio. Los campos con error se marcan en rojo.</p>
-        <label>Cliente <span class="star">*</span><select name="clientId" required></select></label>
-        <div class="row2"><label>Código <span class="star">*</span><input name="code" required placeholder="R1903" maxlength="9" autocomplete="off" spellcheck="false" title="1 letra seguida de hasta 8 números"></label>
-          <label>Tipo <select name="type"><option value="trad">QA Tradicional (Gantt)</option><option value="express">QA Express (rápido)</option></select></label></div>
-        <label>Título <span class="star">*</span><input name="title" required maxlength="120" autocomplete="off" title="Letras, números, espacios y solo estos signos: ( ) # $ / -"></label>
+        <div class="row2"><label>Cliente <span class="star">*</span><select name="clientId" required></select></label>
+          <label>Aranda(s) <input name="aranda" inputmode="numeric" maxlength="9" placeholder="Ej: 123456" autocomplete="off" spellcheck="false" title="Solo números, del 1 al 999999999. Lo edita el administrador o el editor"></label></div>
+        <div class="row2"><label>Código Requerimiento <span class="star">*</span><input name="code" required placeholder="R1903" maxlength="9" autocomplete="off" spellcheck="false" title="1 letra seguida de hasta 8 números"></label>
+          <label>Tipo Actividad <select name="type"><option value="trad">QA Tradicional (Gantt)</option><option value="express">QA Express (rápido)</option></select></label></div>
+        <label>Título Requerimiento <span class="star">*</span><input name="title" required maxlength="120" autocomplete="off" title="Letras, números, espacios y solo estos signos: ( ) # $ / -"></label>
         <div id="srcBox" class="srcBox" hidden></div>
         <div class="row2"><label>Prioridad<select name="priority"><option value="">— sin definir —</option><option>Urgente</option><option>Importante</option><option>Media</option><option>Baja</option></select></label>
           <label>Etapa del proyecto<input name="bucket" list="bucketList" placeholder="Ej: Análisis, Certificación" maxlength="40" autocomplete="off" title="Solo letras y espacios"><datalist id="bucketList"></datalist></label></div>
         <div class="row2"><div class="lbl">Responsables QA<div id="assigneePick"></div></div>
-          <div class="lbl">Responsables de requerimiento<div id="leaderPick"></div></div></div>
-        <div class="row2"><label>Estado <select name="status"><option>Pendiente</option><option>En curso</option><option>Bloqueado</option><option>Completado</option></select></label><div></div></div>
+          <div class="lbl">Responsable del requerimiento<div id="leaderPick"></div></div></div>
+        <div class="row2"><label>Estado del requerimiento <select name="status"><option>Pendiente</option><option>En curso</option><option>Bloqueado</option><option>Completado</option></select></label><div></div></div>
         <div id="commitBox" class="commitBox" hidden></div>
         <div class="row2" id="datesRow"><label>Inicio <input type="date" name="start"></label><label>Fin <input type="date" name="end"></label></div>
         <label id="pctRow">Avance % (express) <input type="number" name="percent" min="0" max="100" step="any"></label>

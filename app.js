@@ -469,7 +469,7 @@
   function visible() {
     const mv = id => QA_MS.get($("#" + id)), t = mv("fType"), ro = mv("fRole"), a = mv("fAssignee"), st = mv("fStatus"), pr = mv("fPrio"), bk = mv("fBucket"), q = $("#fText").value.toLowerCase();
     return scoped().filter(r => (!t.length || t.includes(r.type)) && (!a.length || a.some(x => ids(r).includes(x))) && (!ro.length || ro.some(x => rolesOf(r).includes(x))) && (!st.length || st.includes(r.status)) && (!pr.length || pr.includes(r.priority)) && (!bk.length || bk.includes(r.bucket)) &&
-      (!q || (r.code + " " + r.title + " " + r.comments.map(c => c.text).join(" ")).toLowerCase().includes(q)));
+      (!q || (r.code + " " + (r.aranda || "") + " " + r.title + " " + r.comments.map(c => c.text).join(" ")).toLowerCase().includes(q)));
   }
   let alertsOpen = false;                             // las alertas arrancan cerradas; solo se abren si el usuario las abre
   function renderDash() {
@@ -494,7 +494,7 @@
     $("#tbl").innerHTML = `<thead><tr>${clientId === "all" ? "<th>Cliente</th>" : ""}<th>Código</th><th>Requerimiento</th><th>Tipo</th><th>Responsables QA</th><th>Estado</th><th>Prioridad</th><th class="wr">Etapa del proyecto</th><th>Avance</th><th>Entregables</th><th>Inicio</th><th>Fin</th><th>Último seguimiento</th></tr></thead><tbody>` +
       (rows.map(r => {
         const p = progress(r), [s, e] = span(r), lc = lastComment(r);
-        return `<tr data-id="${r.id}">${clientId === "all" ? `<td>${esc(clientName(r.clientId))}</td>` : ""}<td class="nw"><b>${esc(r.code)}</b></td><td class="rq">${esc(r.title)}</td>
+        return `<tr data-id="${r.id}">${clientId === "all" ? `<td>${esc(clientName(r.clientId))}</td>` : ""}<td class="nw">${r.aranda ? `<span class="arandaTag">Aranda(s) ${esc(r.aranda)}</span><br>` : ""}<b>${esc(r.code)}</b></td><td class="rq">${esc(r.title)}</td>
           <td><span class="pill ${BASE_TYPES[r.type] ? r.type : "custom"}">${esc(typeName(r.type))}</span></td><td class="rs">${esc(mnames(r))}<br><small class="muted">${esc(rolesOf(r).join(", "))}</small>${lnames(r) ? `<br><small>Líder: ${esc(lnames(r))}</small>` : ""}</td>
           <td><div class="stk"><span><span class="dot ${health(r).lvl}" title="${esc(health(r).why.join(" · ") || "En plazo")}"></span> <span class="st st-${r.status.replace(" ", "")}">${r.status}</span></span>${late(r) ? `<span class="st al${lvl(daysLate(span(r)[1]))}">Atrasado ${lvlTxt(daysLate(span(r)[1]))}</span>` : ""}</div></td>
           <td class="nw">${prioPill(r)}</td><td>${r.bucket ? esc(r.bucket) : "—"}</td>
@@ -841,7 +841,7 @@
   function openReq(id) {
     isNew = !id; threadAll = false; editCm = null; histCm.clear(); rmQueue = [];
     draft = id ? JSON.parse(JSON.stringify(store.reqs.find(r => r.id === id)))
-      : { id: uid(), clientId: clientId !== "all" ? clientId : (store.clients[0]?.id || ""), code: "", title: "", type: "trad", assigneeId: "", assigneeIds: [], leaderIds: [], status: "Pendiente", percent: 0, start: today, end: today, acts: [], comments: [] };
+      : { id: uid(), clientId: clientId !== "all" ? clientId : (store.clients[0]?.id || ""), code: "", title: "", type: "trad", createdAt: today, assigneeId: "", assigneeIds: [], leaderIds: [], status: "Pendiente", percent: 0, start: today, end: today, acts: [], comments: [] };
     if (isNew) draft.acts = fromTemplate(today);
     if (!isNew && draft.type === "express" && !draft.acts.length) {           // requerimiento express antiguo: pasa a las 4 actividades
       draft.acts = fromTemplate(draft.start || today); const done = Math.round((draft.percent || 0) / 100 * draft.acts.length); draft.acts.forEach((x, i) => (x.percent = i < done ? 100 : 0));
@@ -851,11 +851,11 @@
     f.clientId.innerHTML = store.clients.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
     setIds(draft, ids(draft));
     renderTypeSel(); renderReqPick(); renderLeaderPick();
-    for (const k of ["clientId", "code", "title", "type", "status", "percent", "start", "end", "priority", "bucket"]) f[k].value = draft[k] ?? "";
+    for (const k of ["clientId", "code", "aranda", "title", "type", "status", "percent", "start", "end", "priority", "bucket"]) f[k].value = draft[k] ?? "";
     fillBuckets(); renderSrc();
     draft.deliverables ||= []; draft.metrics ||= {};
     if (isNew && !draft.deliverables.length) draft.deliverables = (draft.type === "express" ? ["Informe final"] : ["Plan de pruebas", "Evidencias (EVP)", "Informe final"]).map(n => ({ id: uid(), name: n, due: span(draft)[1], state: "pendiente", url: "" }));
-    filterInput(f.code, cleanCode); filterInput(f.title, cleanTitle); filterInput(f.bucket, cleanStage);
+    filterInput(f.code, cleanCode); filterInput(f.aranda, cleanAranda); filterInput(f.title, cleanTitle); filterInput(f.bucket, cleanStage);
     syncType(); renderActs(); renderDel(); renderMetrics(); renderThread(); renderCommit();
     $("#newComment").value = "";
     f.querySelectorAll("input,select,textarea").forEach(e => { if (e.id !== "newComment") e.disabled = readOnly; });
@@ -877,6 +877,7 @@
   function readForm() {
     const f = $("#rform");
     for (const k of ["clientId", "code", "title", "type", "status", "start", "end", "priority"]) draft[k] = f[k].value;
+    draft.aranda = f.aranda.value.trim();
     draft.bucket = f.bucket.value.trim();
     draft.percent = Math.min(100, Math.max(0, +f.percent.value || 0));
   }
@@ -930,7 +931,7 @@
   }
   function renderDel() {
     const t = $("#delTbl"); const al = $("#attLimits"); if (al) al.textContent = `hasta ${MAX_FILES} archivos por entregable, máximo ${fsize(MAX_FILE)} cada uno`;
-    t.innerHTML = `<thead><tr><th>Entregable</th><th>Vence</th><th>Estado</th><th>Enlace (SharePoint / DevOps)</th><th>Archivos adjuntos</th><th></th></tr></thead><tbody>` +
+    t.innerHTML = `<thead><tr><th>Entregable</th><th>Fecha vencimiento</th><th>Estado</th><th>Enlace (SharePoint / DevOps)</th><th>Archivos adjuntos</th><th></th></tr></thead><tbody>` +
       draft.deliverables.map((d, i) => `<tr><td><textarea class="grow" rows="1" data-di="${i}" data-df="name" maxlength="200">${esc(d.name)}</textarea></td><td><input type="date" data-di="${i}" data-df="due" value="${d.due || ""}"></td>
         <td><select data-di="${i}" data-df="state">${Object.entries(DEL_ST).map(([k, v]) => `<option value="${k}"${k === d.state ? " selected" : ""}>${v}</option>`).join("")}</select></td>
         <td><input type="url" data-di="${i}" data-df="url" value="${esc(d.url || "")}" placeholder="https://..."></td>
@@ -1033,6 +1034,8 @@
     if (w.length) $("#metCalc").textContent += (ex !== null || pa !== null || au !== null ? "  " : "") + "⚠ Revisa: " + w.join("; ") + ".";
   }
   const CODE_RE = /^[A-Za-z][0-9]{1,8}$/, TITLE_RE = /^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9 ()#$\/-]+$/, STAGE_RE = /^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ ]+$/;
+  const ARANDA_RE = /^[1-9][0-9]{0,8}$/;                       // 1 a 999999999, solo dígitos
+  const cleanAranda = v => String(v).replace(/\D/g, "").replace(/^0+/, "").slice(0, 9);
   const cleanCode = v => { let out = ""; for (const ch of v.toUpperCase()) { if (!out) { if (/[A-Z]/.test(ch)) out = ch; } else if (/[0-9]/.test(ch) && out.length < 9) out += ch; } return out; };
   const cleanTitle = v => v.replace(/[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9 ()#$\/-]/g, "").replace(/ {2,}/g, " ");
   const cleanStage = v => v.replace(/[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ ]/g, "").replace(/ {2,}/g, " ");
@@ -1101,9 +1104,10 @@
     const form = $("#rform"), bad = [];
     form.querySelectorAll(".bad").forEach(el => el.classList.remove("bad"));
     const mark = (el, why) => { if (!el) return; bad.push(why); if (why) fieldErr(el, why, bad.filter(Boolean).length > 1); else el.classList.add("bad"); };   // el mensaje sale arriba del propio campo
-    for (const [k, n] of [["clientId", "Cliente"], ["code", "Código"], ["title", "Título"]]) if (!String(draft[k] || "").trim()) mark(form[k], `${n} es obligatorio`);
+    for (const [k, n] of [["clientId", "Cliente"], ["code", "Código Requerimiento"], ["title", "Título Requerimiento"]]) if (!String(draft[k] || "").trim()) mark(form[k], `${n} es obligatorio`);
     const was = store.reqs.find(r => r.id === draft.id);        // un código o título antiguo con símbolos no obliga a cambiarlos mientras no se editen
     if (String(draft.code || "").trim() && (isNew || draft.code !== was?.code) && !CODE_RE.test(draft.code)) mark(form.code, "El código debe ser 1 letra seguida de hasta 8 números, sin símbolos (ejemplo: R1903)");
+    if (draft.aranda && !ARANDA_RE.test(draft.aranda)) mark(form.aranda, "Aranda(s) solo admite números, del 1 al 999999999");
     if (String(draft.title || "").trim() && (isNew || draft.title !== was?.title) && !TITLE_RE.test(draft.title)) mark(form.title, "El título solo admite letras, números, espacios y estos signos: ( ) # $ / -");
     if (String(draft.bucket || "").trim() && (isNew || draft.bucket !== was?.bucket) && !STAGE_RE.test(draft.bucket)) mark(form.bucket, "La etapa del proyecto solo admite letras y espacios (sin números, símbolos ni caracteres especiales)");
     const HTTP_RE = /^https?:\/\//i;
@@ -1247,6 +1251,7 @@
     if (!$("#v-dash").hidden) renderDash();
     if (!$("#v-hoy").hidden) renderHoy();
     if (!$("#v-resumen").hidden) renderResumen();
+    if (!$("#v-kpi").hidden) renderKpi();
     if (!$("#v-gantt").hidden) renderGantt();
     if (!$("#v-team").hidden) renderTeam();
     if (!$("#v-leaders").hidden) renderLeaders();
@@ -1257,6 +1262,112 @@
     if (!$("#v-avisos").hidden) renderAvisos();
     if (!$("#v-tpl").hidden) renderTpl();
   }
+  // ---------- KPI / Gráficos (pantalla diaria para jefaturas) ----------
+  // Reglas: rojo = atrasado · ámbar = vence hoy, vence en 48 h o menos con avance menor a 50 %, o bloqueado · verde = en plazo.
+  const KPI_META = +(window.QA_CONFIG?.metaCumplimiento) || 85;        // meta de cumplimiento a tiempo (%)
+  const KPI_EVERY = 120000;                                              // actualización automática: cada 2 minutos
+  const WD = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"], SC = { g: "#2e9e6a", y: "#e0b81b", r: "#d6394a" };
+  let kpiFilter = "";
+  const createdOf = r => String(r.createdAt || span(r)[0] || today).slice(0, 10);
+  const closedOf = r => (r.status === "Completado" ? String(r.completedAt || ldate(r.lastUpdate) || today).slice(0, 10) : "");
+  const dueOf = r => span(r)[1];
+  const isOpen = r => r.status !== "Completado";
+  const wasOpen = (r, d) => createdOf(r) <= d && (!closedOf(r) || closedOf(r) > d);
+  const daysTo = r => d2n(dueOf(r)) - d2n(today);
+  const kStat = r => (daysTo(r) < 0 ? "r" : (daysTo(r) <= 2 && progress(r) < 50) || daysTo(r) === 0 || r.status === "Bloqueado" || r.acts.some(a => a.blocked) ? "y" : "g");
+  const kAge = r => d2n(today) - d2n(createdOf(r));
+  const kReason = r => {
+    const d = daysTo(r), p = progress(r), out = [];
+    if (d < 0) out.push("atrasado " + lvlTxt(-d)); else if (d === 0) out.push("vence hoy con " + p + "% de avance"); else if (d <= 2 && p < 50) out.push("vence en " + d + " d con solo " + p + "%");
+    if (r.status === "Bloqueado" || r.acts.some(a => a.blocked)) out.push("bloqueado");
+    if (!ids(r).length) out.push("sin responsable hace " + kAge(r) + " d");
+    return out.join(" · ") || "en plazo";
+  };
+  function kpiData() {
+    const all = scoped(), open = all.filter(isOpen), yday = D.addDays(today, -1);
+    const late = open.filter(r => daysTo(r) < 0), lateY = all.filter(r => wasOpen(r, yday) && dueOf(r) < yday).length;
+    const hoy = open.filter(r => daysTo(r) === 0), sem = open.filter(r => daysTo(r) >= 0 && daysTo(r) <= 6);
+    const sin = open.filter(r => !ids(r).length), done = all.filter(r => closedOf(r)), onTime = done.filter(r => closedOf(r) <= (r.committedEnd || r.end));
+    const created = all.filter(r => createdOf(r) === today).length, closed = all.filter(r => closedOf(r) === today).length;
+    return { all, open, late, lateY, hoy, sem, sin, done, onTime, created, closed, lateDone: done.filter(r => closedOf(r) > (r.committedEnd || r.end)) };
+  }
+  function svgStack(cols, colors) {
+    const W = 560, H = 236, L = 30, B = 44, T = 22, n = cols.length, ih = H - T - B, slot = (W - L) / n, bw = Math.min(46, slot - 10), tot = c => c.v.reduce((a, b) => a + b, 0), max = Math.max(1, ...cols.map(tot));
+    let s = `<svg viewBox="0 0 ${W} ${H}" class="kchart" role="img">`;
+    [0, 0.5, 1].forEach(f => { const y = T + ih - ih * f; s += `<line x1="${L}" x2="${W}" y1="${y}" y2="${y}" class="kgrid"/><text x="${L - 6}" y="${y + 4}" class="kax" text-anchor="end">${Math.round(max * f)}</text>`; });
+    cols.forEach((c, i) => {
+      const x = L + slot * i + (slot - bw) / 2; let y = T + ih;
+      c.v.forEach((v, k) => { if (!v) return; const h = ih * v / max; y -= h; s += `<rect x="${x}" y="${y}" width="${bw}" height="${h}" fill="${colors[k]}" rx="2"><title>${esc(c.label)}: ${v}</title></rect>`; });
+      if (tot(c)) s += `<text x="${x + bw / 2}" y="${y - 5}" class="kval" text-anchor="middle">${tot(c)}</text>`;
+      s += `<text x="${x + bw / 2}" y="${H - 24}" class="kax${c.hl ? " kon" : ""}" text-anchor="middle">${esc(c.label)}</text>` + (c.sub ? `<text x="${x + bw / 2}" y="${H - 9}" class="kax kax2" text-anchor="middle">${esc(c.sub)}</text>` : "");
+    });
+    return s + "</svg>";
+  }
+  function svgLines(days, series) {
+    const W = 560, H = 236, L = 30, B = 30, T = 16, R = 26, n = days.length, ih = H - T - B, max = Math.max(1, ...series.flatMap(x => x.vals)), X = i => L + (W - L - R) * i / (n - 1), Y = v => T + ih - ih * v / max;
+    let s = `<svg viewBox="0 0 ${W} ${H}" class="kchart" role="img">`;
+    [0, 0.5, 1].forEach(f => { const y = T + ih - ih * f; s += `<line x1="${L}" x2="${W - R}" y1="${y}" y2="${y}" class="kgrid"/><text x="${L - 6}" y="${y + 4}" class="kax" text-anchor="end">${Math.round(max * f)}</text>`; });
+    days.forEach((d, i) => { if ((n - 1 - i) % 7 === 0) s += `<text x="${X(i)}" y="${H - 10}" class="kax" text-anchor="middle">${d.slice(8)}-${d.slice(5, 7)}</text>`; });
+    series.forEach(sr => {
+      s += `<polyline fill="none" stroke="${sr.color}" stroke-width="2.5" stroke-linejoin="round" points="${sr.vals.map((v, i) => X(i).toFixed(1) + "," + Y(v).toFixed(1)).join(" ")}"/>`;
+      const last = sr.vals[n - 1]; s += `<circle cx="${X(n - 1)}" cy="${Y(last)}" r="4" fill="${sr.color}"/><text x="${X(n - 1) + 7}" y="${Y(last) + 4}" class="kval">${last}</text>`;
+    });
+    return s + "</svg>";
+  }
+  function renderKpi() {
+    const k = kpiData(), { open } = k, kd = x => x.length;
+    const dY = k.late.length - k.lateY, delta = dY === 0 ? "igual que ayer" : (dY > 0 ? "+" : "−") + Math.abs(dY) + " vs ayer";
+    const cum = k.done.length ? Math.round(k.onTime.length / k.done.length * 100) : null, sinOld = k.sin.filter(r => kAge(r) > 3), oldest = Math.max(0, ...k.sin.map(kAge));
+    const sinAv = k.hoy.filter(r => progress(r) === 0).length, net = k.created - k.closed;
+    const cards = [
+      ["atrasados", "r", "Atrasados", kd(k.late), delta, dY > 0 ? "worse" : dY < 0 ? "better" : ""],
+      ["hoy", "y", "Vencen hoy", kd(k.hoy), sinAv ? `${sinAv} aún sin avance` : "todos con avance", sinAv ? "worse" : ""],
+      ["semana", "y", "Vencen esta semana", kd(k.sem), "próximos 7 días (incluye hoy)", ""],
+      ["sin", "n", "Sin asignar", kd(k.sin), k.sin.length ? `${sinOld.length} con más de 3 días · el más antiguo, ${oldest} d` : "todos tienen responsable", sinOld.length ? "worse" : ""],
+      ["activos", "n", "Activos hoy", kd(open), `hoy: ${k.created} abiertos − ${k.closed} cerrados = ${net > 0 ? "+" : ""}${net}`, net > 0 ? "worse" : net < 0 ? "better" : ""],
+      ["cumple", cum === null ? "n" : cum >= KPI_META ? "g" : "y", "% cumplimiento a tiempo", cum === null ? "—" : cum + "%", cum === null ? "aún no hay requerimientos cerrados" : `meta ${KPI_META}% · ${k.onTime.length} de ${k.done.length} cerrados a tiempo`, cum !== null && cum < KPI_META ? "worse" : "better"],
+    ];
+    $("#kpiRow").innerHTML = cards.map(([id, c, l, v, sub, tr]) => `<button type="button" class="kcard kc-${c}${kpiFilter === id ? " on" : ""}" data-kf="${id}" aria-pressed="${kpiFilter === id}"><span class="kl">${l}</span><b>${v}</b><small class="${tr}">${esc(sub)}</small></button>`).join("");
+    $("#kpiRow").querySelectorAll("[data-kf]").forEach(b => (b.onclick = () => { kpiFilter = kpiFilter === b.dataset.kf ? "" : b.dataset.kf; renderKpi(); if (kpiFilter) $("#kpiListCard").scrollIntoView({ behavior: "smooth", block: "start" }); }));
+
+    // 1) barras apiladas por día de la semana de vencimiento (semana actual, lunes a domingo; «Antes» = atrasados de semanas anteriores)
+    const dow = new Date(d2n(today) * DAY).getUTCDay(), mon = d2n(today) - ((dow + 6) % 7), cols = [{ label: "Antes", sub: "sem. ant.", v: [0, 0, 0] }, ...WD.map((w, i) => ({ label: w, sub: fd(iso(new Date((mon + i) * DAY))).slice(0, 5), v: [0, 0, 0], hl: mon + i === d2n(today) }))];
+    open.forEach(r => { const n = d2n(dueOf(r)), i = n < mon ? 0 : n <= mon + 6 ? n - mon + 1 : -1; if (i >= 0) cols[i].v[{ g: 0, y: 1, r: 2 }[kStat(r)]]++; });
+    $("#kpiWeek").innerHTML = svgStack(cols, [SC.g, SC.y, SC.r]) + `<div class="klegend"><i style="background:${SC.g}"></i>En plazo <i style="background:${SC.y}"></i>En riesgo <i style="background:${SC.r}"></i>Atrasado</div>`;
+
+    // 2) carga por responsable (requerimientos abiertos; uno con varios responsables cuenta para cada uno)
+    const load = store.members.map(m => { const rs = open.filter(r => ids(r).includes(m.id)); return { name: m.name, v: [rs.filter(r => kStat(r) === "g").length, rs.filter(r => kStat(r) === "y").length, rs.filter(r => kStat(r) === "r").length] }; }).filter(x => x.v.some(Boolean));
+    if (k.sin.length) load.push({ name: "Sin asignar", v: [k.sin.filter(r => kStat(r) === "g").length, k.sin.filter(r => kStat(r) === "y").length, k.sin.filter(r => kStat(r) === "r").length], none: true });
+    const totL = x => x.v.reduce((a, b) => a + b, 0), team = load.filter(x => !x.none), avg = team.length ? team.reduce((a, x) => a + totL(x), 0) / team.length : 0, over = Math.max(5, Math.ceil(avg * 1.5)), mx = Math.max(1, ...load.map(totL));
+    load.sort((a, b) => (b.none ? 1 : 0) - (a.none ? 1 : 0) || totL(b) - totL(a));
+    $("#kpiLoad").innerHTML = load.length ? load.slice(0, 14).map(x => `<div class="lrow"><span class="ln${x.none ? " none" : ""}" title="${esc(x.name)}">${esc(x.name)}</span><span class="ltrack">${x.v.map((v, i) => (v ? `<i style="width:${v / mx * 100}%;background:${[SC.g, SC.y, SC.r][i]}" title="${["En plazo", "En riesgo", "Atrasado"][i]}: ${v}"></i>` : "")).join("")}</span><b>${totL(x)}</b>${!x.none && totL(x) >= over ? '<em class="over">Sobrecargado</em>' : ""}</div>`).join("") + `<p class="muted kn">Sobrecarga: ${over} requerimientos abiertos o más (promedio del equipo: ${avg.toFixed(1).replace(".", ",")}).</p>` : '<p class="muted">No hay requerimientos abiertos.</p>';
+
+    // 3) tendencia de 30 días: ingresados vs cerrados (acumulado en la ventana) y cómo se mueve el backlog
+    const days = Array.from({ length: 30 }, (_, i) => D.addDays(today, i - 29)), d0 = D.addDays(today, -30);
+    const ing = days.map(d => k.all.filter(r => createdOf(r) > d0 && createdOf(r) <= d).length), cer = days.map(d => k.all.filter(r => closedOf(r) && closedOf(r) > d0 && closedOf(r) <= d).length);
+    const b0 = k.all.filter(r => wasOpen(r, d0)).length, b1 = open.length, bd = b1 - b0;
+    $("#kpiTrend").innerHTML = svgLines(days, [{ name: "Abiertos", color: "var(--acc)", vals: ing }, { name: "Cerrados", color: "#9b7bff", vals: cer }]) + `<div class="klegend"><i style="background:var(--acc)"></i>Abiertos (ingresados) <i style="background:#9b7bff"></i>Cerrados · acumulado de los últimos 30 días</div><p class="ktrend">Backlog: <b>${b1}</b> abiertos hoy · ${bd > 0 ? `<span class="worse">sube ${bd} en 30 días</span>` : bd < 0 ? `<span class="better">baja ${-bd} en 30 días</span>` : "se mantiene en 30 días"}</p>`;
+
+    // 4) antigüedad del backlog por tramos (días desde la creación)
+    const tr = [["0–3 d", 0, 3], ["4–7 d", 4, 7], ["8–15 d", 8, 15], ["+15 d", 16, 1e9]].map(([label, a, b]) => ({ label, v: [open.filter(r => kAge(r) >= a && kAge(r) <= b).length] }));
+    $("#kpiAge").innerHTML = svgStack(tr, ["var(--acc)"]) + '<p class="muted kn">Días desde que se registró el requerimiento. Los registrados antes de esta función cuentan desde su fecha de inicio.</p>';
+
+    // lista de acción: «Requieren atención ahora», por urgencia; cada KPI la filtra
+    const FL = { atrasados: ["Atrasados", k.late], hoy: ["Vencen hoy", k.hoy], semana: ["Vencen esta semana", k.sem], sin: ["Sin asignar", k.sin], activos: ["Activos hoy", open], cumple: ["Cerrados fuera de plazo", k.lateDone] };
+    const urg = r => (isOpen(r) ? (kStat(r) === "r" ? 3000 - daysTo(r) * 10 : kStat(r) === "y" ? 2000 - daysTo(r) * 10 : 1000 - daysTo(r)) + (100 - progress(r)) / 10 + (!ids(r).length ? 5 : 0) : 0);
+    const rows = (kpiFilter ? FL[kpiFilter][1] : open.filter(r => kStat(r) !== "g" || (!ids(r).length && kAge(r) > 3))).slice().sort((a, b) => urg(b) - urg(a));
+    $("#kpiFilt").innerHTML = kpiFilter ? `<span class="kchip">Filtro: ${FL[kpiFilter][0]} · ${rows.length} <button type="button" id="kpiClr" aria-label="Quitar filtro">✕ Quitar filtro</button></span>` : `<span class="muted">Ordenados por urgencia: atrasados, luego los que vencen pronto con poco avance. Toca un KPI de arriba para filtrar esta lista; toca una fila para abrir el requerimiento.</span>`;
+    const hc = clientId === "all";
+    $("#kpiTbl").innerHTML = `<thead><tr><th></th><th>Requerimiento</th>${hc ? "<th>Cliente</th>" : ""}<th>Responsable</th><th>Vence</th><th>Plazo</th><th>Avance</th><th>Motivo</th></tr></thead><tbody>` + (rows.length ? rows.map(r => {
+      const d = daysTo(r), st = isOpen(r) ? kStat(r) : "d", p = progress(r), pz = !isOpen(r) ? `cerrado ${fd(closedOf(r))}` : d < 0 ? `${lvlTxt(-d)} de atraso` : d === 0 ? "hoy" : `en ${d} d`;
+      return `<tr data-open="${r.id}"><td><span class="dot ${st}" title="${{ r: "Atrasado", y: "En riesgo", g: "En plazo", d: "Cerrado" }[st]}"></span></td><td class="rq"><b>${esc(r.code)}</b>${r.aranda ? ` <small class="muted">Aranda(s) ${esc(r.aranda)}</small>` : ""} · ${esc(r.title)}</td>${hc ? `<td>${esc(clientName(r.clientId))}</td>` : ""}<td>${esc(mnames(r))}</td><td class="nw">${fd(dueOf(r))}</td><td class="nw">${pz}</td><td><span class="pbar"><i style="width:${p}%"></i><span>${p}%</span></span></td><td>${esc(isOpen(r) ? kReason(r) : "cerrado fuera de plazo")}</td></tr>`;
+    }).join("") : `<tr><td colspan="${hc ? 8 : 7}" class="muted" style="padding:14px">${kpiFilter ? "Nada en esta lista." : "Nada requiere atención ahora. Todo en plazo 👌"}</td></tr>`) + "</tbody>";
+    $("#kpiTbl").querySelectorAll("[data-open]").forEach(x => (x.onclick = () => openReq(x.dataset.open)));
+    $("#kpiClr")?.addEventListener("click", () => { kpiFilter = ""; renderKpi(); });
+    $("#kpiStamp").textContent = "Actualizado " + new Date().toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) + " · se actualiza solo cada 2 min";
+  }
+  $("#kpiRefresh").onclick = () => { const b = $("#kpiRefresh"); b.disabled = true; b.textContent = "↻ Actualizando…"; setTimeout(() => { renderKpi(); b.disabled = false; b.textContent = "↻ Actualizar"; }, 250); };
+  setInterval(() => { if (!$("#v-kpi").hidden && !document.hidden) renderKpi(); }, KPI_EVERY);
   // ---------- Importar Excel / CSV ----------
   const norm = s => String(s ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
   const HEAD = { code: ["codigo", "cod", "id", "nro", "numero", "n", "ticket", "codigo requerimiento"], title: ["titulo", "nombre", "descripcion", "detalle", "requerimiento", "proyecto"], client: ["cliente", "empresa"],
@@ -1323,7 +1434,7 @@
       let s = r.start; const acts = tpl.map((t, i) => { const e = addDays(s, ds[i] - 1), x = { id: uid(), name: t.name, start: s, end: e, percent: 0, assigneeId: r.assigneeId, blocked: false, blockReason: "", blockedSince: "" }; s = addDays(e, 1); return x; });
       const p = r.status === "Completado" ? 100 : (r.percent ?? 0), done = Math.round(p / 100 * acts.length); acts.forEach((x, i) => (x.percent = i < done ? 100 : 0));
       const end = acts[acts.length - 1].end;
-      const req = { id: uid(), clientId: cid, code: r.code, title: r.title, type: r.type, assigneeId: r.assigneeId, status: r.status || (done ? "En curso" : "Pendiente"), percent: 0, start: r.start, end, acts,
+      const req = { id: uid(), createdAt: today, clientId: cid, code: r.code, title: r.title, type: r.type, assigneeId: r.assigneeId, status: r.status || (done ? "En curso" : "Pendiente"), percent: 0, start: r.start, end, acts,
         committedEnd: r.end || end, dateLog: [], lastUpdate: at, deliverables: (r.type === "express" ? ["Informe final"] : ["Plan de pruebas", "Evidencias (EVP)", "Informe final"]).map(n => ({ id: uid(), name: n, due: end, state: "pendiente", url: "" })), metrics: {},
         comments: [{ id: uid(), at, by, text: "Requerimiento importado desde planilla." }] };
       req.percent = progress(req); if (req.percent >= 100) { req.status = "Completado"; req.completedAt = today; } reqs.push(req);
