@@ -118,7 +118,7 @@
     <select id="fAssignee" aria-label="Filtrar por integrante"><option value="">Todos los responsables QA</option></select>
     <select id="fPrio" aria-label="Filtrar por prioridad"><option value="">Todas las prioridades</option><option>Urgente</option><option>Importante</option><option>Media</option><option>Baja</option></select>
     <select id="fBucket" aria-label="Filtrar por etapa del proyecto"><option value="">Todas las etapas</option></select>
-    <select id="fStatus" aria-label="Filtrar por estado"><option value="">Todos los estados</option><option>Pendiente</option><option>En curso</option><option>Bloqueado</option><option>Completado</option></select>
+    <select id="fStatus" aria-label="Filtrar por estado"><option value="">Todos los estados</option><option>Sin Asignación</option><option>Pendiente</option><option>En curso</option><option>Bloqueado</option><option>Completado</option></select>
     <input id="fText" type="search" aria-label="Buscar requerimiento por código, título o comentario" placeholder="Buscar código, título o comentario…">
     <button type="button" id="btnClearFilters" class="ghost" disabled title="Quita todos los filtros aplicados (se activa cuando hay alguno)">✕ Borrar filtros</button>
     <div class="spacer"></div>
@@ -160,7 +160,7 @@
 </section>
 <section id="v-gantt" class="view" hidden>
   <div class="toolbar gtoolbar">
-    <span class="muted gdesc">Muestra los requerimientos que dejes filtrados en la solapa Dashboard: cualquier filtro que apliques allá (tipo, rol, equipo, estado, prioridad, etapa o texto) se refleja aquí. Pasa el mouse por una barra para ver su detalle y haz clic para editar sus fechas.</span>
+    <span class="muted gdesc">Muestra los requerimientos que dejes filtrados en la solapa Dashboard: cualquier filtro que apliques allá (tipo, rol, equipo, estado, prioridad, etapa o texto) se refleja aquí. Pasa el mouse por una barra para ver su detalle y haz clic para editar sus fechas. Solo se muestran los días hábiles (lunes a viernes); las columnas <b class="gleg">amarillas</b> son feriados en Chile (pasa el mouse por el encabezado para ver cuál). En cada tarea, <b class="glegv">verde</b> = trabajo real dentro de las fechas que estableció el responsable y <b class="glegx">amarillo oscuro</b> = días adicionales hasta que la entregó.</span>
     <div class="gtools">
       <div class="seg" id="zoom"><button data-z="32">Día</button><button data-z="14" class="on">Semana</button><button data-z="5">Mes</button></div>
       <button id="btnGanttXls" class="ghost"><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v12M7 11l5 5 5-5M4 20h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Exportar Gantt (Excel)</button>
@@ -254,21 +254,8 @@
 </section>
 
 <section id="v-tpl" class="view" hidden>
-  <div class="toolbar"><button type="button" id="btnTplNew" class="primary" data-edit>+ Nuevo tipo</button><span class="muted">Cada tipo es una plantilla de actividades: se elige en el campo "Tipo" del requerimiento. Crea los tuyos además de Tradicional y Express.</span></div>
-  <div class="card">
-    <h2>Actividades base de QA Tradicional</h2>
-    <p class="muted">Se copian a cada requerimiento tradicional nuevo (carta Gantt completa), y allí puedes ajustarlas. Cambiar esto no altera requerimientos ya creados.</p>
-    <table id="tplTbl-trad"></table>
-    <button class="tplAdd" data-k="trad" data-edit>+ Actividad</button>
-    <button class="tplReset" data-k="trad" data-edit>Restaurar por defecto</button>
-  </div>
-  <div class="card">
-    <h2>Actividades base de QA Express</h2>
-    <p class="muted">Pruebas rápidas: diseño de casos, ejecución, certificación e informe final. Se copian a cada requerimiento express nuevo.</p>
-    <table id="tplTbl-express"></table>
-    <button class="tplAdd" data-k="express" data-edit>+ Actividad</button>
-    <button class="tplReset" data-k="express" data-edit>Restaurar por defecto</button>
-  </div>
+  <div class="toolbar"><button type="button" id="btnTplNew" class="primary" data-edit>+ Nuevo tipo</button><span class="muted">Cada tipo es una plantilla de actividades: se elige en el campo "Tipo Actividad" del requerimiento (según la sucursal). Todas se pueden editar: su título, sus actividades, los días y el orden.</span></div>
+  <div id="tplBase"></div>
   <div id="tplCustom"></div>
 </section>
 
@@ -350,34 +337,42 @@
 
 <dialog id="dlg">
   <form method="dialog" id="rform" class="rform">
-    <header><h2 id="rTitle">Requerimiento</h2><button type="button" id="rClose" aria-label="Cerrar">✕</button></header>
+    <header><h2 id="rTitle">Requerimiento</h2><span id="rCreated" class="rCreated"></span><button type="button" id="rClose" aria-label="Cerrar">✕</button></header>
+    <nav class="steps" id="steps" aria-label="Pasos del requerimiento">
+      <button type="button" data-step="1"><i>1</i> Datos del requerimiento</button>
+      <button type="button" data-step="2"><i>2</i> Actividades</button>
+      <button type="button" data-step="3"><i>3</i> Entregables</button>
+      <button type="button" data-step="4"><i>4</i> Métricas y trazabilidad</button>
+    </nav>
     <div class="rgrid">
-      <div class="col">
+      <div class="col" id="s1">
         <p class="hint reqnote"><span class="star">*</span> Campo obligatorio. Los campos con error se marcan en rojo.</p>
-        <div class="row2"><label>Cliente <span class="star">*</span><select name="clientId" required></select></label>
-          <label>Aranda(s) <input name="aranda" inputmode="numeric" maxlength="9" placeholder="Ej: 123456" autocomplete="off" spellcheck="false" title="Solo números, del 1 al 999999999. Lo edita el administrador o el editor"></label></div>
+        <p class="hint" id="lockNote" hidden>Solo el administrador puede editar estos datos. Tú puedes cambiar el <b>Estado del requerimiento</b>.</p>
+        <div class="row2"><label id="lblClient">Cliente <span class="star">*</span><select name="clientId" required></select></label>
+          <label>Sucursal <span class="star">*</span><select name="branch"><option value="">— seleccionar —</option><option>IPS</option><option>Chile Atiende</option></select></label></div>
         <div class="row2"><label>Código Requerimiento <span class="star">*</span><input name="code" required placeholder="R1903" maxlength="9" autocomplete="off" spellcheck="false" title="1 letra seguida de hasta 8 números"></label>
-          <label>Tipo Actividad <select name="type"><option value="trad">QA Tradicional (Gantt)</option><option value="express">QA Express (rápido)</option></select></label></div>
+          <label>Aranda(s) <input name="aranda" inputmode="numeric" maxlength="9" placeholder="Ej: 123456 (opcional)" autocomplete="off" spellcheck="false" title="Opcional. Solo números, del 1 al 999999999"></label></div>
         <label>Título Requerimiento <span class="star">*</span><input name="title" required maxlength="120" autocomplete="off" title="Letras, números, espacios y solo estos signos: ( ) # $ / -"></label>
         <div id="srcBox" class="srcBox" hidden></div>
-        <div class="row2"><label>Prioridad<select name="priority"><option value="">— sin definir —</option><option>Urgente</option><option>Importante</option><option>Media</option><option>Baja</option></select></label>
-          <label>Etapa del proyecto<input name="bucket" list="bucketList" placeholder="Ej: Análisis, Certificación" maxlength="40" autocomplete="off" title="Solo letras y espacios"><datalist id="bucketList"></datalist></label></div>
+        <div class="row2"><label>Tipo Actividad <span class="star">*</span><select name="type"></select></label>
+          <label>Prioridad<select name="priority"><option value="">— sin definir —</option><option>Urgente</option><option>Importante</option><option>Media</option><option>Baja</option></select></label></div>
         <div class="row2"><div class="lbl">Responsables QA<div id="assigneePick"></div></div>
-          <div class="lbl">Responsable del requerimiento<div id="leaderPick"></div></div></div>
-        <div class="row2"><label>Estado del requerimiento <select name="status"><option>Pendiente</option><option>En curso</option><option>Bloqueado</option><option>Completado</option></select></label><div></div></div>
+          <div class="lbl">Responsable del requerimiento <span class="star">*</span><div id="leaderPick"></div></div></div>
+        <div class="row2" id="stRow"><label>Estado del requerimiento <select name="status"></select></label><div></div></div>
         <div id="commitBox" class="commitBox" hidden></div>
-        <div class="row2" id="datesRow"><label>Inicio <input type="date" name="start"></label><label>Fin <input type="date" name="end"></label></div>
-        <label id="pctRow">Avance % (express) <input type="number" name="percent" min="0" max="100" step="any"></label>
+        <div class="row2" id="datesRow" hidden><label>Inicio <input type="date" name="start"></label><label>Fin <input type="date" name="end"></label></div>
+        <label id="pctRow" hidden>Avance % (express) <input type="number" name="percent" min="0" max="100" step="any"></label>
       </div>
-      <div class="col">
+      <div class="col" id="cmCol">
         <h3>Seguimiento / comentarios</h3>
         <div id="thread" class="thread"></div>
         <div class="newc"><textarea id="newComment" rows="3" maxlength="5000" placeholder="Escribe un avance, bloqueo o acuerdo…"></textarea>
           <button type="button" id="btnComment" class="primary">Agregar comentario</button></div>
       </div>
-      <div class="col wide">
+      <div class="col wide" id="wideCol">
         <div id="actsBox">
-          <h3>Actividades <span class="star">*</span> <button type="button" id="btnActAdd" data-edit>+</button></h3>
+          <div id="commitBox2" class="commitBox" hidden></div>
+          <h3>Actividades <span class="star">*</span> <button type="button" id="btnActAdd" data-edit>+</button> <button type="button" id="btnTime" class="primary" hidden>⏱ Gestión del tiempo</button></h3>
           <table id="actTbl"></table>
         </div>
         <div id="delBox">
@@ -407,6 +402,8 @@
     <footer>
       <button type="button" id="rDelete" class="danger" data-edit>Eliminar</button>
       <div class="spacer"></div>
+      <button type="button" id="rPrev" hidden>← Atrás</button>
+      <button type="button" id="rNext" class="primary" hidden>Siguiente →</button>
       <button type="button" id="rCancel">Cerrar</button>
       <button type="submit" id="rSave" class="primary" data-edit>Guardar</button>
     </footer>

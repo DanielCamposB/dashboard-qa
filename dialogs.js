@@ -18,7 +18,7 @@
       $(".askT").textContent = o.title || (o.input ? "Escribe un valor" : "Confirmar");
       $(".askM").textContent = o.msg || "";
       yes.textContent = o.ok || "Aceptar"; no.textContent = o.cancel || "Cancelar";
-      yes.classList.toggle("danger", !!o.danger); yes.classList.toggle("primary", !o.danger);
+      dlg.classList.toggle("wide", !!o.wide); yes.classList.toggle("danger", !!o.danger); yes.classList.toggle("primary", !o.danger);
       inp.hidden = !o.input; inp.value = o.def || ""; inp.placeholder = o.placeholder || ""; err.hidden = true;
       const done = v => { yes.onclick = no.onclick = null; inp.onkeydown = null; dlg.close(); resolve(v); };
       yes.onclick = () => { if (!o.input) return done(true); const v = inp.value.trim(); if (!v && !o.optional) { err.textContent = "Escribe un valor para continuar."; err.hidden = false; inp.focus(); return; } done(v); };

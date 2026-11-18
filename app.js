@@ -196,10 +196,12 @@
   const mnames = (x, fb) => { const l = effIds(x, fb); return l.length ? l.map(mname).join(", ") : "—"; };
   const pctOpts = cur => { const l = Array.from({ length: 21 }, (_, i) => i * 5); if (!l.includes(cur) && cur >= 0) l.push(cur), l.sort((x, y) => x - y); return l.map(p => `<option${p === cur ? " selected" : ""}>${p}</option>`).join(""); };
   // Tipos de requerimiento = plantillas de actividades: "trad", "express" y las personalizadas (customTpl)
-  const BASE_TYPES = { trad: "Tradicional", express: "Express" };
-  const typeName = t => BASE_TYPES[t] || (store.customTpl || []).find(c => c.id === t)?.name || "Tipo eliminado";
+  const BASE_TYPES = { trad: "Tradicional", express: "Express", backoffice: "Back Office", frontend: "Front-end" };
+  const BRANCHES = { "IPS": ["trad", "express", "backoffice"], "Chile Atiende": ["trad", "express", "frontend"] };   // Sucursal → tipos de actividad que se pueden elegir
+  const TPL_BASE = ["trad", "express", "backoffice", "frontend"], DEF_NAMES = { trad: "QA Tradicional", express: "QA Express", backoffice: "Back Office", frontend: "Front-end" };
+  const typeName = t => (TPL_BASE.includes(t) ? (store.tplNames || {})[t] || DEF_NAMES[t] : (store.customTpl || []).find(c => c.id === t)?.name) || "Tipo eliminado";
   const tplFor = t => store.templates[t] || (store.customTpl || []).find(c => c.id === t)?.acts || store.templates.trad;
-  const typeOpts = (first, base) => (first ? `<option value="">${first}</option>` : "") + (base ? `<option value="trad">QA Tradicional (Gantt)</option><option value="express">QA Express (rápido)</option>` : `<option value="express">QA Express</option><option value="trad">QA Tradicional</option>`) + (store.customTpl || []).map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
+  const typeOpts = first => (first ? `<option value="">${first}</option>` : "") + [...TPL_BASE.map(k => [k, typeName(k)]), ...(store.customTpl || []).map(c => [c.id, c.name])].map(([k, n]) => `<option value="${esc(k)}">${esc(n)}</option>`).join("");
   const setIds =(x, l) => { x.assigneeIds = l; x.assigneeId = l[0] || ""; };
   const rolesOf = x => [...new Set(ids(x).flatMap(memberRoles))];
   // selector múltiple de personas (responsables QA o responsables de requerimiento): los elegidos se ven como etiquetas que se acomodan sin solaparse
@@ -210,13 +212,15 @@
   const lnames = r => leaderIds(r).map(i => store.leaders.find(l => l.id === i).name).join(", ");
 
   // ---------- cálculos ----------
-  const span = r => r.acts.length ? [r.acts.map(a => a.start).sort()[0], r.acts.map(a => a.end).sort().pop()] : [r.start, r.end];
+  const hasD = a => !!(a.start && a.end);                       // la actividad ya tiene sus fechas
+  const span = r => { const w = r.acts.filter(hasD); return w.length ? [w.map(a => a.start).sort()[0], w.map(a => a.end).sort().pop()] : [r.start || "", r.end || ""]; };
+  const timeManaged = r => r.timeManaged === true || (r.timeManaged === undefined && r.acts.some(hasD));   // «Gestión del tiempo» ya realizada (los requerimientos antiguos con fechas cuentan como realizada)
   function progress(r) {
     if (!r.acts.length) return +r.percent || 0;
-    const w = r.acts.map(a => d2n(a.end) - d2n(a.start) + 1), tot = w.reduce((s, x) => s + x, 0);
+    const w = r.acts.map(a => (hasD(a) ? Math.max(1, d2n(a.end) - d2n(a.start) + 1) : 1)), tot = w.reduce((s, x) => s + x, 0);
     return Math.round(r.acts.reduce((s, a, i) => s + a.percent * w[i], 0) / tot);
   }
-  const late = r => r.status !== "Completado" && span(r)[1] < today;
+  const late = r => r.status !== "Completado" && !!span(r)[1] && span(r)[1] < today;
   // Alertas de atraso: 1 día, 2-4, 5-6, 1 semana, 2+ semanas
   const daysLate = end => d2n(today) - d2n(end);
   const lvl = d => d >= 14 ? 4 : d >= 7 ? 3 : d >= 5 ? 2 : d >= 2 ? 1 : 0;
@@ -261,7 +265,21 @@
     if (staleDays(r) >= STALE) { yel = true; why.push("sin actualizar " + staleDays(r) + " días hábiles"); }
     return { lvl: red ? "r" : yel ? "y" : "g", why };
   }
+  function createdLabel(r) {                         // «Creado: 17-11-2026 14:39 · por Daniel»
+    const v = String(r.createdAt || ""), fmt = x => new Date(x).toLocaleString("es-CL", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }).replace(",", "");
+    return v ? "Creado: " + (v.includes("T") ? fmt(v) : fd(v.slice(0, 10))) + (r.createdBy ? " · por " + r.createdBy : "") : "Creado: sin registro";
+  }
+  // fechas reales: la actividad empezó cuando se registró su primer avance (no antes de lo planificado) y terminó cuando llegó a 100 %
+  function stampActual(r) {
+    r.acts.forEach(x => {
+      if (x.percent > 0 && !x.actualStart) x.actualStart = x.start && x.start < today ? x.start : today;
+      if (x.percent <= 0) x.actualStart = "";
+      if (x.percent >= 100 && !x.actualEnd) x.actualEnd = today;
+      if (x.percent < 100) x.actualEnd = "";
+    });
+  }
   function statusSync(r, nowIso) {
+    stampActual(r);
     const p = progress(r), anyB = r.acts.some(x => x.blocked); r.percent = p; r.lastUpdate = nowIso;
     if (p >= 100) { if (r.status !== "Completado") { r.status = "Completado"; r.completedAt = today; } return; }
     if (r.status === "Completado") r.status = "En curso";
@@ -496,9 +514,9 @@
         const p = progress(r), [s, e] = span(r), lc = lastComment(r);
         return `<tr data-id="${r.id}">${clientId === "all" ? `<td>${esc(clientName(r.clientId))}</td>` : ""}<td class="nw">${r.aranda ? `<span class="arandaTag">Aranda(s) ${esc(r.aranda)}</span><br>` : ""}<b>${esc(r.code)}</b></td><td class="rq">${esc(r.title)}</td>
           <td><span class="pill ${BASE_TYPES[r.type] ? r.type : "custom"}">${esc(typeName(r.type))}</span></td><td class="rs">${esc(mnames(r))}<br><small class="muted">${esc(rolesOf(r).join(", "))}</small>${lnames(r) ? `<br><small>Líder: ${esc(lnames(r))}</small>` : ""}</td>
-          <td><div class="stk"><span><span class="dot ${health(r).lvl}" title="${esc(health(r).why.join(" · ") || "En plazo")}"></span> <span class="st st-${r.status.replace(" ", "")}">${r.status}</span></span>${late(r) ? `<span class="st al${lvl(daysLate(span(r)[1]))}">Atrasado ${lvlTxt(daysLate(span(r)[1]))}</span>` : ""}</div></td>
+          <td><div class="stk"><span><span class="dot ${health(r).lvl}" title="${esc(health(r).why.join(" · ") || "En plazo")}"></span> <span class="st st-${r.status.replace(" ", "").replace("ó", "o")}">${r.status}</span></span>${late(r) ? `<span class="st al${lvl(daysLate(span(r)[1]))}">Atrasado ${lvlTxt(daysLate(span(r)[1]))}</span>` : ""}</div></td>
           <td class="nw">${prioPill(r)}</td><td>${r.bucket ? esc(r.bucket) : "—"}</td>
-          <td><div class="pbar"><i style="width:${p}%"></i><span>${p}%</span></div></td><td class="nw">${r.deliverables.length ? `${delDone(r)}/${r.deliverables.length}${delOverdue(r).length ? ` <span class="st al3">${delOverdue(r).length} vencido(s)</span>` : ""}` : "—"}</td><td class="nw">${fd(s)}</td><td class="nw">${fd(e)}${slip(r) ? ` <span class="st al1" title="Comprometida: ${fd(r.committedEnd)}">+${slip(r)} d</span>` : ""}</td>
+          <td><div class="pbar"><i style="width:${p}%"></i><span>${p}%</span></div></td><td class="nw">${r.deliverables.length ? `${delDone(r)}/${r.deliverables.length}${delOverdue(r).length ? ` <span class="st al3">${delOverdue(r).length} vencido(s)</span>` : ""}` : "—"}</td><td class="nw">${fd(s) || "—"}</td><td class="nw">${fd(e) || "—"}${slip(r) ? ` <span class="st al1" title="Comprometida: ${fd(r.committedEnd)}">+${slip(r)} d</span>` : ""}</td>
           <td class="lc">${lc ? `<small>${fd(lc.at.slice(0, 10))} · ${esc(lc.by)}</small><br>${esc(lc.text.slice(0, 90))}` : '<small class="muted">Sin comentarios</small>'} <small class="muted">(${r.comments.length})</small></td></tr>`;
       }).join("") || `<tr><td colspan="13" class="muted" style="padding:20px">Sin requerimientos. Usa "+ Requerimiento".</td></tr>`) + `</tbody>`;
     const hs = [...$("#tbl").querySelectorAll("thead th")].map(t => t.textContent);   // etiquetas para la vista de tarjetas en móvil
@@ -542,7 +560,7 @@
     const mineOn = $("#hoyMine").checked, me = myMemberId(), mine = mineOn && me;
     $("#hoyMineNote").textContent = mineOn && !me ? "No encontré tu correo en la pestaña Equipo; se muestran todas." : "";
     const items = [];
-    scoped().forEach(r => { if (r.status === "Completado") return; r.acts.forEach(a => { if (a.percent >= 100) return; if (mine && !effIds(a, r).includes(me)) return; items.push({ r, a }); }); });
+    scoped().forEach(r => { if (r.status === "Completado") return; r.acts.forEach(a => { if (a.percent >= 100 || !hasD(a)) return; if (mine && !effIds(a, r).includes(me)) return; items.push({ r, a }); }); });
     const t0 = d2n(today), within = (i, n) => d2n(i.a.end) > t0 && d2n(i.a.end) <= t0 + n;
     const groups = [
       ["Atrasadas", "al3", items.filter(i => i.a.end < today && !i.a.blocked)],
@@ -552,7 +570,7 @@
       ["Vencen en los próximos 3 días", "al0", items.filter(i => within(i, 3) && !i.a.blocked)]
     ];
     const row = ({ r, a }) => {
-      const late = a.end < today ? ` · <b class="red">${lvlTxt(daysLate(a.end))} de atraso</b>` : "";
+      const late = a.end && a.end < today ? ` · <b class="red">${lvlTxt(daysLate(a.end))} de atraso</b>` : "";
       const blk = a.blocked ? ` · <b class="orange">Bloqueada ${a.blockedSince ? lvlTxt(d2n(today) - d2n(a.blockedSince)) : ""}</b> ${a.blockReason ? "— " + esc(a.blockReason) : ""}` : "";
       return `<div class="hrow" data-r="${r.id}" data-a="${a.id}">
         <div class="hinfo"><b>${esc(r.code)}</b> · ${esc(r.title)} <small class="muted">${esc(clientName(r.clientId))}</small>
@@ -575,6 +593,8 @@
       const rowEl = btn.closest(".hrow"), rid = rowEl.dataset.r, aid = rowEl.dataset.a;
       const pct = +rowEl.querySelector(".hp").value, blocked = rowEl.querySelector(".hbk").checked && +rowEl.querySelector(".hp").value < 100, text = rowEl.querySelector(".hc").value.trim();
       if (blocked && !text && !store.reqs.find(x => x.id === rid)?.acts.find(x => x.id === aid)?.blockReason) return fieldErr(rowEl.querySelector(".hc"), "Indica el motivo del bloqueo en el comentario.");
+      { const rq0 = store.reqs.find(x => x.id === rid), i0 = rq0 ? rq0.acts.findIndex(y => y.id === aid) : -1;
+        if (i0 >= 0) { const cur = rq0.acts[i0].percent, mg = timeManaged(rq0), chk = pct > 0 && cur === 0 ? startCheck(rq0.acts, i0, mg) : pct < cur ? lowerCheck(rq0.acts, i0, pct, mg) : { ok: true }; if (!chk.ok) return say(chk.why, 1); } }
       const wasBlocked0 = !!store.reqs.find(x => x.id === rid)?.acts.find(x => x.id === aid)?.blocked;
       const by = authorName(), at = new Date().toISOString(), cid = uid();
       commit(s => {
@@ -592,47 +612,85 @@
   }
 
   // ---------- Gantt ----------
+  // ---- carta Gantt: solo lunes a viernes, y feriados de Chile resaltados ----
+  const isWk = n => { const w = new Date(n * DAY).getUTCDay(); return w !== 0 && w !== 6; };
+  const wParts = n => { const k = n + 3, wk = Math.floor(k / 7); return [wk, k - wk * 7]; };               // semana y día (0 = lunes) de un número de día
+  const wIdx = n => { const [wk, d] = wParts(n); return wk * 5 + Math.min(d, 5); };                          // columna hábil donde empieza el día (sábado y domingo → lunes siguiente)
+  const wEnd = n => { const [wk, d] = wParts(n); return wk * 5 + Math.min(d, 4); };                          // última columna hábil hasta ese día (sábado y domingo → viernes)
+  const HOL_CACHE = {};
+  function chHolidays(y) {                                                                                  // feriados legales de Chile de un año: { "aaaa-mm-dd": nombre }
+    if (HOL_CACHE[y]) return HOL_CACHE[y];
+    const m = {}, dt = (mo, d) => new Date(Date.UTC(y, mo - 1, d)), key = d => d.toISOString().slice(0, 10), add = (d, n) => { const x = new Date(d); x.setUTCDate(x.getUTCDate() + n); return x; }, set = (d, nm) => { m[key(d)] = nm; };
+    const q1 = y % 19, q2 = Math.floor(y / 100), q3 = y % 100, q4 = Math.floor(q2 / 4), q5 = q2 % 4, q6 = Math.floor((q2 + 8) / 25), q7 = Math.floor((q2 - q6 + 1) / 3), q8 = (19 * q1 + q2 - q4 - q7 + 15) % 30, q9 = Math.floor(q3 / 4), q10 = q3 % 4, q11 = (32 + 2 * q5 + 2 * q9 - q8 - q10) % 7, q12 = Math.floor((q1 + 11 * q8 + 22 * q11) / 451);
+    const easter = dt(Math.floor((q8 + q11 - 7 * q12 + 114) / 31), ((q8 + q11 - 7 * q12 + 114) % 31) + 1);   // Domingo de Pascua
+    const mon = d => { const w = d.getUTCDay(); return w === 2 || w === 3 ? add(d, -(w - 1)) : w === 4 || w === 5 ? add(d, 8 - w) : d; };   // martes o miércoles → lunes anterior; jueves o viernes → lunes siguiente
+    set(dt(1, 1), "Año Nuevo"); set(add(easter, -2), "Viernes Santo"); set(add(easter, -1), "Sábado Santo"); set(dt(5, 1), "Día Nacional del Trabajo"); set(dt(5, 21), "Día de las Glorias Navales");
+    set(dt(6, { 2025: 20, 2028: 20, 2029: 20, 2032: 20, 2033: 20 }[y] || 21), "Día Nacional de los Pueblos Indígenas");   // solsticio de invierno
+    set(mon(dt(6, 29)), "San Pedro y San Pablo"); set(dt(7, 16), "Día de la Virgen del Carmen"); set(dt(8, 15), "Asunción de la Virgen"); set(dt(9, 18), "Independencia Nacional"); set(dt(9, 19), "Día de las Glorias del Ejército");
+    if (dt(9, 17).getUTCDay() === 1) set(dt(9, 17), "Feriado adicional de Fiestas Patrias"); if (dt(9, 20).getUTCDay() === 5) set(dt(9, 20), "Feriado adicional de Fiestas Patrias");
+    set(mon(dt(10, 12)), "Encuentro de Dos Mundos");
+    { const o = dt(10, 31), w = o.getUTCDay(); set(w === 2 ? add(o, -4) : w === 3 ? add(o, 2) : o, "Día de las Iglesias Evangélicas y Protestantes"); }
+    set(dt(11, 1), "Día de Todos los Santos"); set(dt(12, 8), "Inmaculada Concepción"); set(dt(12, 25), "Navidad");
+    return (HOL_CACHE[y] = m);
+  }
+  const holidayName = n => { const d = new Date(n * DAY); return chHolidays(d.getUTCFullYear())[d.toISOString().slice(0, 10)] || ""; };
   function renderGantt() {
     document.querySelectorAll("#zoom button").forEach(b => b.classList.toggle("on", +b.dataset.z === pxDay));
     const list = visible(), g = $("#gantt");
     g.className = "gantt" + (readOnly ? " read" : "");
     if (!list.length) { g.innerHTML = `<p class="muted" style="padding:20px">Sin requerimientos para mostrar.</p>`; return; }
-    const all = list.flatMap(r => span(r)).map(d2n);
+    const all = list.flatMap(r => span(r)).map(d2n).filter(Number.isFinite);
     const min = Math.min(...all, d2n(today)) - 5;
     const last = new Date(Math.max(...all, d2n(today)) * DAY);
     const max = Math.round(Date.UTC(last.getUTCFullYear(), last.getUTCMonth() + 2, 0) / DAY);   // hasta fin del mes siguiente al del último término (1 mes de margen): si termina el 31-dic, se ve hasta enero
-    const W = (max - min + 1) * pxDay, x = n => (n - min) * pxDay;
+    const base = wIdx(min), W = (wEnd(max) - base + 1) * pxDay, x = n => (wIdx(n) - base) * pxDay, wspan = (s, e) => Math.max(1, wEnd(e) - wIdx(s) + 1);   // columnas solo de lunes a viernes
     let ticks = "";
     // meses: un segmento continuo por mes (el nombre se recorta dentro de su propio ancho, nunca se monta con el siguiente)
     for (let n = min; n <= max;) {
-      const d = new Date(n * DAY), nxt = Math.min(max + 1, Math.round(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1) / DAY)), w = (nxt - n) * pxDay;
+      const d = new Date(n * DAY), nxt = Math.min(max + 1, Math.round(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1) / DAY)), w = Math.max(0, wEnd(nxt - 1) - wIdx(n) + 1) * pxDay;
       const lbl = w < 26 ? "" : d.toLocaleDateString("es", w < 70 ? { month: "short", timeZone: "UTC" } : { month: "short", year: "2-digit", timeZone: "UTC" });
-      ticks += `<div class="g-tick m g-seg" style="left:${x(n)}px;width:${w}px" title="${esc(d.toLocaleDateString("es", { month: "long", year: "numeric", timeZone: "UTC" }))}">${esc(lbl)}</div>`;
+      if (w > 0) ticks += `<div class="g-tick m g-seg" style="left:${x(n)}px;width:${w}px" title="${esc(d.toLocaleDateString("es", { month: "long", year: "numeric", timeZone: "UTC" }))}">${esc(lbl)}</div>`;
       n = nxt;
     }
     // días: todos si hay espacio; si no, cada lunes (semana continua). Nunca se omiten semanas intermedias.
+    let holBody = "";
     for (let n = min; n <= max; n++) {
-      const d = new Date(n * DAY), dd = d.getUTCDate();
+      if (!isWk(n)) continue;
+      const d = new Date(n * DAY), dd = d.getUTCDate(), hn = holidayName(n);
+      if (hn) {                                                                                             // feriado: columna amarilla con su nombre al pasar el mouse
+        ticks += `<div class="g-hol hd" style="left:${x(n)}px;width:${pxDay}px" title="Feriado: ${esc(hn)} (${fd(d.toISOString().slice(0, 10))})" aria-label="Feriado: ${esc(hn)}"></div>`;
+        holBody += `<i class="g-hol" style="left:${x(n)}px;width:${pxDay}px"></i>`;
+      }
       if (pxDay >= 28 || (pxDay >= 4 && d.getUTCDay() === 1)) ticks += `<div class="g-tick d" style="left:${x(n)}px">${dd}</div>`;
     }
     const ST_NAME = { Pendiente: "Pendiente", Encurso: "En curso", Bloqueado: "Bloqueado", Atrasado: "Atrasado", Completado: "Completado" };
     const bar = (kind, id, obj, st, label, pct) => {
+      if (!obj.start || !obj.end) return "";   // sin fechas todavía: no hay barra
       const s = d2n(obj.start), e = Math.max(d2n(obj.end), s), stName = ST_NAME[st.split(" ")[0].replace("st-", "")] || "", who = obj.name || (obj.code ? obj.code + " · " + obj.title : "");
       const aria = `${who ? who + ". " : ""}${stName ? stName + ", " : ""}${pct}% de avance. ${fd(obj.start)} a ${fd(obj.end)}. Enter para editar las fechas.`;
-      return `<div class="bar ${st}" data-k="${kind}" data-id="${id}" tabindex="0" role="button" style="left:${x(s)}px;width:${(e - s + 1) * pxDay}px" aria-label="${esc(aria)}"><div class="fill" style="width:${pct}%"></div><span>${(pxDay >= 14 || kind !== "act") && label ? esc(label) : ""}</span></div>`;
+      return `<div class="bar ${st}" data-k="${kind}" data-id="${id}" tabindex="0" role="button" style="left:${x(s)}px;width:${wspan(s, e) * pxDay}px" aria-label="${esc(aria)}"><div class="fill" style="width:${pct}%"></div><span>${(pxDay >= 14 || kind !== "act") && label ? esc(label) : ""}</span></div>`;
     };
     let h = `<div class="g-inner" style="width:calc(var(--lw) + ${W}px)"><div class="g-head"><div class="g-row" style="height:46px;border:0"><div class="g-label" style="cursor:default">Requerimiento / actividad</div><div class="g-track" style="width:${W}px">${ticks}</div></div></div>`;
     for (const r of list) {
-      const [s, e] = span(r), p = progress(r), st = "st-" + (late(r) && r.status !== "Bloqueado" ? "Atrasado" : r.status.replace(" ", ""));
+      const [s, e] = span(r), p = progress(r), st = "st-" + (late(r) && r.status !== "Bloqueado" ? "Atrasado" : r.status.replace(" ", "").replace("ó", "o"));
       const exp = !r.acts.length, sumLabel = `${r.code} · ${ST_NAME[st.replace("st-", "")] || r.status} · ${p}% · vence ${fd(e)}${slip(r) ? " (+" + slip(r) + " d)" : ""}`;
       h += `<div class="g-row grp"><div class="g-label" data-open="${r.id}">${esc(r.code)} · ${esc(r.title)}<small>${r.type !== "trad" ? esc(typeName(r.type)) + " · " : ""}${esc(mnames(r))} · ${p}%</small></div>
         <div class="g-track" style="width:${W}px">${r.committedEnd && r.committedEnd !== e ? `<i class="cmark" style="left:${x(d2n(r.committedEnd) + 1)}px" title="Fecha comprometida ${fd(r.committedEnd)}"></i>` : ""}${exp ? bar("req", r.id, r, st, sumLabel, p) : bar("sum", r.id, { start: s, end: e, name: r.code + " · " + r.title }, st + " sum", sumLabel, p)}</div></div>`;
       if (!exp) for (const a of r.acts) {
-        const ast = a.blocked ? "st-Bloqueado" : a.percent >= 100 ? "st-Completado" : a.end < today ? "st-Atrasado" : a.percent > 0 ? "st-Encurso" : "st-Pendiente";
-        h += `<div class="g-row"><div class="g-label" data-open="${r.id}">&nbsp;&nbsp;${esc(a.name)}<small>${esc(mnames(a, r))}</small></div><div class="g-track" style="width:${W}px">${bar("act", r.id + "|" + a.id, a, ast, a.percent + "%", a.percent)}</div></div>`;
+        const aS = a.actualStart && a.start && a.actualStart < a.start ? a.actualStart : a.start, aE = a.percent >= 100 && a.actualEnd ? a.actualEnd : a.end;   // la carta muestra cuándo empezó y terminó de verdad
+        const free = a.percent >= 100 && a.actualEnd && a.end && a.actualEnd < a.end ? wEnd(d2n(a.end)) - wEnd(d2n(a.actualEnd)) : 0;                              // días que quedaron libres por terminar antes
+        const realEnd = a.percent >= 100 && a.actualEnd ? a.actualEnd : (a.percent < 100 && a.actualStart && a.end && a.end < today ? today : "");   // hasta cuándo se trabajó de verdad (entregada, o hoy si sigue pasada de plazo)
+        const aid = r.id + "|" + a.id;
+        let actBars;
+        if (realEnd && a.end) {
+          const extra = realEnd > a.end ? wEnd(d2n(realEnd)) - wEnd(d2n(a.end)) : 0, xs = aS > a.end ? aS : D.addDays(a.end, 1), gEnd = realEnd < a.end ? realEnd : a.end;
+          actBars = (aS <= a.end ? bar("act", aid, { ...a, start: aS, end: gEnd }, a.percent >= 100 ? "st-Completado" : "st-Real", a.percent + "%", a.percent) : "") + (extra > 0 ? bar("act", aid, { ...a, start: xs, end: realEnd }, "st-Extra", "+" + extra + " d", 0) : "");
+        }
+        const ast = a.blocked ? "st-Bloqueado" : a.percent >= 100 ? "st-Completado" : a.end && a.end < today ? "st-Atrasado" : a.percent > 0 ? "st-Encurso" : "st-Pendiente";
+        h += `<div class="g-row"><div class="g-label" data-open="${r.id}">&nbsp;&nbsp;${esc(a.name)}<small>${esc(mnames(a, r))}</small></div><div class="g-track" style="width:${W}px">${actBars || bar("act", aid, { ...a, start: aS, end: aE }, ast, a.percent + "%", a.percent)}${free ? `<i class="gfree" style="left:${x(d2n(a.actualEnd) + 1)}px;width:${free * pxDay}px" title="${free} día(s) hábil(es) libres: terminó el ${fd(a.actualEnd)} (plan: ${fd(a.end)}). Sin asignación hasta la siguiente actividad.">${free * pxDay >= 70 ? free + " d libres" : ""}</i>` : ""}</div></div>`;
       }
     }
-    h += `<div style="position:absolute;left:var(--lw);top:46px;bottom:0;width:${W}px;pointer-events:none"><div class="today" style="left:${x(d2n(today)) + pxDay / 2}px"></div></div></div>`;
+    h += `<div style="position:absolute;left:var(--lw);top:46px;bottom:0;width:${W}px;pointer-events:none">${holBody}<div class="today" style="left:${x(d2n(today)) + pxDay / 2}px"></div></div></div>`;
     g.innerHTML = h;
     g.querySelectorAll("[data-open]").forEach(l => (l.onclick = () => openReq(l.dataset.open)));
     g.querySelectorAll(".bar").forEach(bindBar);
@@ -657,21 +715,23 @@
   function hideGtip() { if (gtipEl) gtipEl.hidden = true; gtipFor = null; }
   function gtipHtml(bar) {
     const [rid, aid] = bar.dataset.id.split("|"), r = store.reqs.find(x => x.id === rid); if (!r) return "";
-    const a = aid ? r.acts.find(x => x.id === aid) : null, cls = (bar.className.match(/st-\w+/) || ["st-Pendiente"])[0], name = { "st-Pendiente": "Pendiente", "st-Encurso": "En curso", "st-Bloqueado": "Bloqueado", "st-Atrasado": "Atrasado", "st-Completado": "Completado" }[cls];
+    const a = aid ? r.acts.find(x => x.id === aid) : null, cls = (bar.className.match(/st-\w+/) || ["st-Pendiente"])[0], name = { "st-Pendiente": "Pendiente", "st-Encurso": "En curso", "st-Bloqueado": "Bloqueado", "st-Atrasado": "Atrasado", "st-Completado": "Completado", "st-Real": "En curso", "st-Extra": "Días adicionales" }[cls];
     const row = (l, v) => (v ? `<div class="gt-r"><span>${l}</span><b>${v}</b></div>` : "");
-    const days = (s, e) => d2n(e) - d2n(s) + 1, plural = n => n + (n === 1 ? " día" : " días");
+    const days = (s, e) => Math.max(1, wEnd(d2n(e)) - wIdx(d2n(s)) + 1), plural = n => n + (n === 1 ? " día" : " días");
     let title, sub, pct, rows = "", note = "", hint;
     if (a) {
       title = a.name; sub = `${r.code} · ${r.title}`; pct = a.percent; hint = "Clic para editar las fechas de esta actividad";
-      rows = row("Inicio", fd(a.start)) + row("Fin", fd(a.end)) + row("Duración", plural(days(a.start, a.end))) + row("Responsables", esc(mnames(a, r)));
+      rows = row("Inicio", fd(a.start)) + row("Fin", fd(a.end)) + row("Duración", plural(days(a.start, a.end)) + " hábiles") + row("Responsables", esc(mnames(a, r)));
+      if (a.actualStart || a.actualEnd) rows += row("Inicio real", fd(a.actualStart)) + row("Fin real", a.actualEnd ? fd(a.actualEnd) + (a.end && a.actualEnd < a.end ? ` · <em>${plural(wEnd(d2n(a.end)) - wEnd(d2n(a.actualEnd)))} hábiles libres</em>` : "") : "");
       if (a.blocked) note = `<div class="gt-n blk">Bloqueada${a.blockedSince ? " desde el " + fd(a.blockedSince) + " (" + lvlTxt(Math.max(0, d2n(today) - d2n(a.blockedSince))) + ")" : ""}${a.blockReason ? "<br>Motivo: " + esc(a.blockReason) : ""}</div>`;
-      else if (a.percent < 100 && a.end < today) note = `<div class="gt-n late">${lvlTxt(daysLate(a.end))} de atraso</div>`;
+      else if (a.percent < 100 && a.end && a.end < today) note = `<div class="gt-n late">${lvlTxt(daysLate(a.end))} de atraso</div>`;
+      if (cls === "st-Extra") note = `<div class="gt-n late">Días adicionales: pasó la fecha de término que estableció el responsable (${fd(a.end)}).</div>`;
     } else {
-      const [s, e] = span(r), n = r.acts.length, done = r.acts.filter(x => x.percent >= 100).length, blk = r.acts.filter(x => x.blocked).length, lt = r.acts.filter(x => x.percent < 100 && x.end < today).length;
+      const [s, e] = span(r), n = r.acts.length, done = r.acts.filter(x => x.percent >= 100).length, blk = r.acts.filter(x => x.blocked).length, lt = r.acts.filter(x => x.percent < 100 && x.end && x.end < today).length;
       title = `${r.code} · ${r.title}`; sub = `${clientName(r.clientId)} · ${typeName(r.type)}`; pct = progress(r); hint = "Clic para abrir y editar el requerimiento";
       rows = row("Inicio", fd(s)) + row("Fin (plazo actual)", fd(e) + (late(r) ? ` <em class="gt-bad">· ${lvlTxt(daysLate(e))} de atraso</em>` : ""))
         + (r.committedEnd ? row("Fecha comprometida", fd(r.committedEnd) + (slip(r) ? ` <em class="gt-bad">· +${plural(slip(r))}</em>` : " · en plazo")) : "")
-        + row("Duración", plural(days(s, e))) + row("Prioridad", r.priority ? esc(r.priority) : "") + row("Etapa", r.bucket ? esc(r.bucket) : "")
+        + row("Duración", plural(days(s, e)) + " hábiles") + row("Prioridad", r.priority ? esc(r.priority) : "") + row("Etapa", r.bucket ? esc(r.bucket) : "")
         + row("Responsables QA", esc(mnames(r))) + row("Responsables de requerimiento", esc(lnames(r)))
         + (n ? row("Actividades", `${done} de ${n} completadas${blk ? " · " + blk + " bloqueada" + (blk > 1 ? "s" : "") : ""}${lt ? " · " + lt + " atrasada" + (lt > 1 ? "s" : "") : ""}`) : "")
         + (r.deliverables.length ? row("Entregables", `${delDone(r)} de ${r.deliverables.length}` + (delOverdue(r).length ? ` <em class="gt-bad">· ${delOverdue(r).length} vencido(s)</em>` : "")) : "");
@@ -776,7 +836,7 @@
   }
   function renderLeaderPick() {
     const box = $("#leaderPick"), open = box.querySelector("details")?.open, q = box.querySelector(".rpsearch")?.value || "";
-    box.innerHTML = idPick(store.leaders, "data-rl", leaderIds(draft), readOnly, "Agrega responsables en la solapa «Responsables de requerimiento»");
+    box.innerHTML = idPick(store.leaders, "data-rl", leaderIds(draft), lock1, "Agrega responsables en la solapa «Responsables de requerimiento»");
     if (open) { box.querySelector("details").open = true; restoreSearch(box, q); }
     box.querySelectorAll("[data-rl]").forEach(cb => (cb.onchange = () => { draft.leaderIds = [...box.querySelectorAll("[data-rl]:checked")].map(x => x.value); renderLeaderPick(); }));
   }
@@ -790,21 +850,52 @@
   }
   // Duración de una actividad de plantilla: en días o en HH (horas hombre; 8 HH = 1 día)
   const HH_DAY = 8;
+  // ---- reglas de avance: no se puede avanzar una actividad sin terminar la anterior ----
+  const DEP_TXT = { none: "Libre (sin dependencia)", prev: "Requiere la anterior al 100 %", dates: "Anterior al 100 % + Gestión del tiempo" };
+  const actUnits = acts => { const u = []; acts.forEach((x, i) => { const g = String(x.grp || "").trim(), l = u[u.length - 1]; if (g && l && l.grp === g) l.to = i; else u.push({ from: i, to: i, grp: g }); }); return u; };   // actividades seguidas con el mismo grupo = un bloque
+  function startCheck(acts, i, managed) {        // ¿se puede iniciar (avanzar más de 0 %) la actividad i?
+    const x = acts[i], dep = x.dep || "none"; if (dep === "none") return { ok: true };
+    const units = actUnits(acts), ui = units.findIndex(u => i >= u.from && i <= u.to), u = units[ui];
+    if (i > u.from) { if (acts[i - 1].percent < 100) return { ok: false, why: `Antes de iniciar «${x.name}» termina «${acts[i - 1].name}» (100 %).` }; }                       // dentro de un bloque, en orden
+    else if (ui > 0) { const p = units[ui - 1], mem = acts.slice(p.from, p.to + 1); if (!mem.some(m => m.percent >= 100)) return { ok: false, why: p.grp ? `Antes de iniciar «${x.name}» termina (100 %) al menos una de las actividades de «${p.grp}».` : `Antes de iniciar «${x.name}» termina «${mem[0].name}» (100 %).` }; }
+    if (dep === "dates" && !managed) return { ok: false, why: `Antes de iniciar «${x.name}» ingresa las fechas del requerimiento con «Gestión del tiempo».` };
+    return { ok: true };
+  }
+  function lowerCheck(acts, i, newP, managed) {  // bajar de 100 % una actividad cuyas siguientes ya tienen avance rompería la secuencia
+    if (newP >= 100) return { ok: true };
+    const old = acts[i].percent; acts[i].percent = newP; let bad = null;
+    for (let k = i + 1; k < acts.length && !bad; k++) if (acts[k].percent > 0 && !startCheck(acts, k, managed).ok) bad = acts[k];
+    acts[i].percent = old; return bad ? { ok: false, why: `No puedes bajar «${acts[i].name}» de 100 %: «${bad.name}» ya tiene avance.` } : { ok: true };
+  }
   const tplDays = t => (t.unit === "hh" ? Math.max(1, Math.ceil((+t.days || 1) / HH_DAY)) : Math.max(1, +t.days || 1));
   function tplTable(tbl, t) {
-    tbl.innerHTML = `<thead><tr><th>#</th><th>Actividad</th><th>Duración <select data-allunit aria-label="Poner todas las actividades en la misma unidad"><option value="">Unidad de todas…</option><option value="d">Todas en días</option><option value="hh">Todas en HH</option></select></th><th></th></tr></thead><tbody>` +
+    tbl.innerHTML = `<thead><tr><th>#</th><th>Actividad</th><th>Duración <select data-allunit aria-label="Poner todas las actividades en la misma unidad"><option value="">Unidad de todas…</option><option value="d">Todas en días</option><option value="hh">Todas en HH</option></select></th><th>Regla de avance <small class="opt">(para iniciar)</small></th><th></th></tr></thead><tbody>` +
       t.map((x, i) => `<tr><td>${i + 1}</td><td><textarea class="grow" rows="1" maxlength="500" data-i="${i}" data-f="name">${esc(x.name)}</textarea></td><td><div class="durw"><input type="number" min="1" data-i="${i}" data-f="days" value="${x.days}" aria-label="Duración"><select data-i="${i}" data-f="unit" aria-label="Unidad de la duración"><option value="d"${x.unit !== "hh" ? " selected" : ""}>Días</option><option value="hh"${x.unit === "hh" ? " selected" : ""}>HH</option></select></div>${x.unit === "hh" ? `<small class="muted">≈ ${tplDays(x)} día(s) · ${HH_DAY} HH = 1 día</small>` : ""}</td>
-        <td><button data-up="${i}">↑</button> <button data-rm="${i}" class="danger">✕</button></td></tr>`).join("") + `</tbody>`;
+        <td class="rulec"><select data-i="${i}" data-f="dep" aria-label="Regla de avance">${Object.entries(DEP_TXT).map(([k, v]) => `<option value="${k}"${(x.dep || (i ? "prev" : "none")) === k ? " selected" : ""}>${v}</option>`).join("")}</select><input data-i="${i}" data-f="grp" value="${esc(x.grp || "")}" maxlength="20" placeholder="Grupo (opcional)" title="Las actividades seguidas con el mismo grupo se hacen en orden, y la siguiente actividad solo exige que una de ellas esté al 100 %" aria-label="Grupo de actividades"></td>
+        <td><button data-up="${i}">↑</button> <button data-dn="${i}">↓</button> <button data-rm="${i}" class="danger">✕</button></td></tr>`).join("") + `</tbody>`;
     tbl.querySelectorAll("input,textarea,select[data-f]").forEach(i => { i.onchange = () => { t[+i.dataset.i][i.dataset.f] = i.dataset.f === "days" ? Math.max(1, +i.value) : i.value; save(); if (i.dataset.f === "unit" || i.dataset.f === "days") tplTable(tbl, t); }; i.disabled = readOnly; });
     const all = tbl.querySelector("[data-allunit]"); all.disabled = readOnly;
     all.onchange = () => { if (!all.value) return; t.forEach(x => { x.unit = all.value; }); save(); tplTable(tbl, t); say(all.value === "hh" ? "Todas las actividades quedaron en HH." : "Todas las actividades quedaron en días."); };
     tbl.querySelectorAll("[data-rm]").forEach(b => (b.onclick = () => { t.splice(+b.dataset.rm, 1); save(); renderTpl(); }));
+    tbl.querySelectorAll("[data-dn]").forEach(b => (b.onclick = () => { const i = +b.dataset.dn; if (i < t.length - 1) { [t[i + 1], t[i]] = [t[i], t[i + 1]]; save(); renderTpl(); } }));
     tbl.querySelectorAll("[data-up]").forEach(b => (b.onclick = () => { const i = +b.dataset.up; if (i) { [t[i - 1], t[i]] = [t[i], t[i - 1]]; save(); renderTpl(); } }));
     tbl.querySelectorAll("button").forEach(b => (b.hidden = readOnly));
     autosize(tbl);
   }
   function renderTpl() {
-    for (const k of ["trad", "express"]) tplTable($("#tplTbl-" + k), store.templates[k]);
+    const nameTaken = (v, except) => [...TPL_BASE.map(k => [k, typeName(k)]), ...(store.customTpl || []).map(c => [c.id, c.name])].some(([k, n]) => k !== except && n.trim().toLowerCase() === v.toLowerCase());
+    store.tplNames ||= {}; TPL_BASE.forEach(k => (store.templates[k] ||= D.defaultTemplates()[k]));
+    const bb = $("#tplBase");
+    bb.innerHTML = TPL_BASE.map(k => `<div class="card"><h2><input class="tplName" data-bk="${k}" value="${esc(typeName(k))}" maxlength="40" aria-label="Nombre de la plantilla"${readOnly ? " disabled" : ""}></h2>
+      <p class="muted">Actividades base: se copian a cada requerimiento de este tipo cuando se crea, y allí se pueden ajustar. Cambiar esto no altera requerimientos ya creados.</p>
+      <table id="tplTbl-${k}"></table>
+      <button class="tplAdd" data-k="${k}" data-edit>+ Actividad</button>
+      <button class="tplReset" data-k="${k}" data-edit>Restaurar actividades por defecto</button></div>`).join("");
+    TPL_BASE.forEach(k => tplTable($("#tplTbl-" + k), store.templates[k]));
+    bb.querySelectorAll(".tplName").forEach(i => (i.onchange = () => { const v = i.value.trim(), k = i.dataset.bk; if (!v) { i.value = typeName(k); return; } if (nameTaken(v, k)) { i.value = typeName(k); return say("Ya existe una plantilla con ese nombre.", 1); } store.tplNames[k] = v; save(); render(); say("Nombre actualizado ✓"); }));
+    bb.querySelectorAll(".tplAdd").forEach(b => (b.onclick = () => { store.templates[b.dataset.k].push({ name: "Nueva actividad", days: 1, unit: "d", dep: "prev", grp: "" }); save(); renderTpl(); }));
+    bb.querySelectorAll(".tplReset").forEach(b => (b.onclick = async () => { if (await ask("¿Restaurar las actividades por defecto de esta plantilla?")) { store.templates[b.dataset.k] = D.defaultTemplates()[b.dataset.k]; save(); renderTpl(); } }));
+    bb.querySelectorAll("[data-edit]").forEach(b => (b.hidden = readOnly));
     const box = $("#tplCustom");
     box.innerHTML = (store.customTpl || []).map((c, n) => `<div class="card" data-c="${n}">
       <h2><input class="tplName" data-cn="${n}" value="${esc(c.name)}" aria-label="Nombre de la plantilla"${readOnly ? " disabled" : ""}></h2>
@@ -813,94 +904,178 @@
       <button class="tplCAdd" data-n="${n}" data-edit>+ Actividad</button>
       <button class="tplCDel danger" data-n="${n}" data-edit>Eliminar tipo</button></div>`).join("");
     (store.customTpl || []).forEach((c, n) => tplTable($("#tplTblC-" + n), c.acts));
-    box.querySelectorAll(".tplName").forEach(i => (i.onchange = () => { const v = i.value.trim(); if (!v) { i.value = store.customTpl[+i.dataset.cn].name; return; } store.customTpl[+i.dataset.cn].name = v; save(); render(); }));
-    box.querySelectorAll(".tplCAdd").forEach(b => (b.onclick = () => { store.customTpl[+b.dataset.n].acts.push({ name: "Nueva actividad", days: 1, unit: "d" }); save(); renderTpl(); }));
+    box.querySelectorAll(".tplName").forEach(i => (i.onchange = () => { const v = i.value.trim(); if (!v) { i.value = store.customTpl[+i.dataset.cn].name; return; } const cc = store.customTpl[+i.dataset.cn]; if (nameTaken(v, cc.id)) { i.value = cc.name; return say("Ya existe una plantilla con ese nombre.", 1); } store.customTpl[+i.dataset.cn].name = v; save(); render(); }));
+    box.querySelectorAll(".tplCAdd").forEach(b => (b.onclick = () => { store.customTpl[+b.dataset.n].acts.push({ name: "Nueva actividad", days: 1, unit: "d", dep: "prev", grp: "" }); save(); renderTpl(); }));
     box.querySelectorAll(".tplCDel").forEach(b => (b.onclick = async () => { const c = store.customTpl[+b.dataset.n], n = store.reqs.filter(r => r.type === c.id).length; if (n) return say(`No se puede eliminar "${c.name}": lo usan ${n} requerimiento(s). Cámbiales el tipo primero.`, 1); if (!await ask(`¿Eliminar el tipo "${c.name}"?`)) return; store.customTpl.splice(+b.dataset.n, 1); save(); renderTpl(); }));
     box.querySelectorAll("[data-edit]").forEach(b => (b.hidden = readOnly));
   }
-  function renderTypeSel() {
-    $("#rform").type.innerHTML = typeOpts("", true);
+  function renderTypeSel(keep) {
+    const f = $("#rform"), br = f.branch.value, list = BRANCHES[br] || TPL_BASE, cur = keep ?? draft?.type ?? "";
+    let o = '<option value="">— seleccionar —</option>' + list.map(k => `<option value="${k}">${esc(typeName(k))}</option>`).join("");
+    if (cur && !list.includes(cur)) o += `<option value="${esc(cur)}">${esc(typeName(cur))}</option>`;   // tipo antiguo (p. ej. personalizado): se conserva hasta que lo cambien
+    f.type.innerHTML = o; f.type.value = cur;
   }
   function renderTypeFilter() {
     const ft = $("#fType"), keep = ft.value; ft.innerHTML = typeOpts("Todos los tipos", false); ft.value = [...ft.options].some(o => o.value === keep) ? keep : "";
   }
 
   // ---------- Requerimiento (ventana) ----------
-  function fromTemplate(start) {
-    let s = start || today;
-    return tplFor(draft?.type || "trad").map(a => { const x = { id: uid(), name: a.name, start: s, end: addDays(s, tplDays(a) - 1), percent: 0, blocked: false }; setIds(x, ids(draft)); s = addDays(x.end, 1); return x; });
+  function fromTemplate(start) {   // start vacío: las actividades nacen sin fechas (se ingresan después con «Gestión del tiempo»)
+    let s = start || "";
+    return tplFor(draft?.type || "trad").map((a, ti) => { const x = s ? { id: uid(), name: a.name, start: s, end: addDays(s, tplDays(a) - 1), percent: 0, blocked: false } : { id: uid(), name: a.name, start: "", end: "", percent: 0, blocked: false }; x.dep = a.dep || (ti ? "prev" : "none"); x.grp = a.grp || ""; setIds(x, ids(draft)); if (s) s = addDays(x.end, 1); return x; });
   }
   function renderReqPick() {
     const box = $("#assigneePick"), open = box.querySelector("details")?.open, q = box.querySelector(".rpsearch")?.value || "";
-    box.innerHTML = memberPick("data-ra", ids(draft), readOnly);
+    box.innerHTML = memberPick("data-ra", ids(draft), lock1);
     if (open) { box.querySelector("details").open = true; restoreSearch(box, q); }
     box.querySelectorAll("[data-ra]").forEach(cb => (cb.onchange = () => { setIds(draft, [...box.querySelectorAll("[data-ra]:checked")].map(x => x.value)); renderReqPick(); }));
   }
-  let openSnap = "";
+  let openSnap = "", step = 1, maxStep = 1, actsRespTouched = false, openedAt = "", lock1 = false;   // paso del asistente, ¿el usuario ya tocó los responsables de las actividades?, instante de apertura, datos del paso 1 bloqueados
   const dirtyReq = () => { if (readOnly) return false; try { readForm(); } catch {} return JSON.stringify(draft) !== openSnap; };
   function openReq(id) {
     isNew = !id; threadAll = false; editCm = null; histCm.clear(); rmQueue = [];
+    step = 1; maxStep = 1; commitOpen = false; actsRespTouched = false; openedAt = new Date().toISOString(); lock1 = readOnly || (!isNew && !isAdm());   // creado: solo el administrador edita el paso 1 (el editor solo el estado)
     draft = id ? JSON.parse(JSON.stringify(store.reqs.find(r => r.id === id)))
-      : { id: uid(), clientId: clientId !== "all" ? clientId : (store.clients[0]?.id || ""), code: "", title: "", type: "trad", createdAt: today, assigneeId: "", assigneeIds: [], leaderIds: [], status: "Pendiente", percent: 0, start: today, end: today, acts: [], comments: [] };
-    if (isNew) draft.acts = fromTemplate(today);
+      : { id: uid(), clientId: clientId !== "all" ? clientId : (store.clients[0]?.id || ""), code: "", title: "", type: "", branch: "", createdAt: new Date().toISOString(), assigneeId: "", assigneeIds: [], leaderIds: [], status: "Pendiente", percent: 0, start: "", end: "", timeManaged: false, acts: [], comments: [] };
+    if (isNew) draft.acts = fromTemplate("");
     if (!isNew && draft.type === "express" && !draft.acts.length) {           // requerimiento express antiguo: pasa a las 4 actividades
       draft.acts = fromTemplate(draft.start || today); const done = Math.round((draft.percent || 0) / 100 * draft.acts.length); draft.acts.forEach((x, i) => (x.percent = i < done ? 100 : 0));
     }
     const f = $("#rform");
+    $("#rCreated").textContent = isNew ? "" : createdLabel(draft);
     $("#rTitle").textContent = isNew ? "Nuevo requerimiento" : `${draft.code} · ${draft.title}`;
     f.clientId.innerHTML = store.clients.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
     setIds(draft, ids(draft));
-    renderTypeSel(); renderReqPick(); renderLeaderPick();
-    for (const k of ["clientId", "code", "aranda", "title", "type", "status", "percent", "start", "end", "priority", "bucket"]) f[k].value = draft[k] ?? "";
-    fillBuckets(); renderSrc();
+    $("#lblClient").firstChild.textContent = clientLabel() + " ";
+    f.branch.value = draft.branch || ""; renderTypeSel(draft.type || ""); renderReqPick(); renderLeaderPick();
+    f.status.innerHTML = ["Pendiente", "En curso", "Bloqueado", "Completado"].concat(draft.status === "Sin Asignación" ? ["Sin Asignación"] : []).map(s => `<option>${s}</option>`).join("");
+    for (const k of ["clientId", "code", "aranda", "title", "status", "percent", "start", "end", "priority"]) f[k].value = draft[k] ?? "";
+    renderSrc();
     draft.deliverables ||= []; draft.metrics ||= {};
     if (isNew && !draft.deliverables.length) draft.deliverables = (draft.type === "express" ? ["Informe final"] : ["Plan de pruebas", "Evidencias (EVP)", "Informe final"]).map(n => ({ id: uid(), name: n, due: span(draft)[1], state: "pendiente", url: "" }));
-    filterInput(f.code, cleanCode); filterInput(f.aranda, cleanAranda); filterInput(f.title, cleanTitle); filterInput(f.bucket, cleanStage);
+    filterInput(f.code, cleanCode); filterInput(f.aranda, cleanAranda); filterInput(f.title, cleanTitle);
     syncType(); renderActs(); renderDel(); renderMetrics(); renderThread(); renderCommit();
     $("#newComment").value = "";
     f.querySelectorAll("input,select,textarea").forEach(e => { if (e.id !== "newComment") e.disabled = readOnly; });
+    ["clientId", "branch", "type", "aranda", "code", "title", "priority"].forEach(k => (f[k].disabled = lock1));
+    f.querySelectorAll("#assigneePick input, #leaderPick input").forEach(e => (e.disabled = lock1));
+    syncActRules();
+    f.status.disabled = readOnly; $("#stRow").hidden = isNew; $("#lockNote").hidden = !(!isNew && !readOnly && !isAdm());
     $("#newComment").disabled = readOnly && !D.remote; $("#btnComment").hidden = readOnly && !D.remote; $("#rSave").hidden = readOnly; $("#rDelete").hidden = readOnly || isNew;
     f.querySelectorAll("[data-edit]").forEach(e => { if (e.id !== "rSave" && e.id !== "rDelete") e.hidden = readOnly; });
+    goStep(1);
     $("#dlg").showModal(); autosize($("#actTbl")); syncCm();
     try { readForm(); } catch {} openSnap = JSON.stringify(draft);        // foto inicial para detectar cambios sin guardar
   }
+  const overlapsOf = acts => { const L = acts.filter(x => hasD(x) && x.end >= x.start), out = []; for (let i = 0; i < L.length; i++) for (let j = i + 1; j < L.length; j++) if (L[i].start <= L[j].end && L[j].start <= L[i].end) out.push([L[i], L[j]]); return out; };   // actividades cuyas fechas se pisan
+  let commitOpen = false;                             // el recuadro de plazos / solapamientos arranca minimizado
   function renderCommit() {
-    const b = $("#commitBox"); if (isNew || !draft.committedEnd) { b.hidden = true; return; }
-    const cur = span(draft)[1], d = d2n(cur) - d2n(draft.committedEnd);
-    b.hidden = false;
-    b.innerHTML = `<b>Compromiso:</b> ${fd(draft.committedEnd)} · <b>Plazo actual:</b> ${fd(cur)} ${d > 0 ? `<span class="st al1">+${d} días</span>` : d < 0 ? `<span class="st st-Completado">${d} días</span>` : '<span class="st st-Completado">en plazo</span>'}` +
-      (draft.dateLog.length ? `<details><summary>Historial de cambios de plazo (${draft.dateLog.length})</summary>` + draft.dateLog.map(l => `<div class="dl"><small>${new Date(l.at).toLocaleString("es")} · <b>${esc(l.by)}</b></small><br>${fd(l.from)} → ${fd(l.to)}: ${esc(l.reason)}</div>`).join("") + "</details>" : "");
+    const boxes = [$("#commitBox"), $("#commitBox2")].filter(Boolean), ov = isNew ? [] : overlapsOf(draft.acts), hasC = !isNew && !!draft.committedEnd, log = isNew ? [] : (draft.dateLog || []), pend = isNew ? [] : (draft.ovPending || []);   // pend: solapamientos aceptados que aún no se guardan
+    if (!hasC && !ov.length && !log.length && !pend.length) { boxes.forEach(b => { b.hidden = true; b.classList.remove("hasov"); }); return; }
+    let sum = "", body = "";
+    if (hasC) { const cur = span(draft)[1], d = d2n(cur) - d2n(draft.committedEnd); sum = `<b>Compromiso:</b> ${fd(draft.committedEnd)} · <b>Plazo actual:</b> ${fd(cur)} ${d > 0 ? `<span class="st al1">+${d} días</span>` : d < 0 ? `<span class="st st-Completado">${d} días</span>` : '<span class="st st-Completado">en plazo</span>'}`; }
+    else sum = "<b>Plazos y solapamientos</b>";
+    if (ov.length) sum += ` <span class="st al3 cbxw">⚠ ${ov.length} solapamiento${ov.length > 1 ? "s" : ""} de actividades</span>`;
+    if (pend.length) sum += ` <span class="st al1">${pend.length} cambio${pend.length > 1 ? "s" : ""} sin guardar</span>`;
+    if (ov.length) body += `<div class="ovw top">⚠ Actividades solapadas: ${ov.map(([x, y]) => `«${esc(x.name)}» (${fd(x.start)} a ${fd(x.end)}) con «${esc(y.name)}» (${fd(y.start)} a ${fd(y.end)})`).join("; ")}</div>`;
+    if (log.length || pend.length) body += `<div class="cbxh"><b>Historial de cambios de plazo (${log.length + pend.length})</b></div>` + log.map(l => {
+      const ch = (l.changes || []).map(x => `<div>«${esc(x.name)}»: ${fd(x.fromS) || "—"} a ${fd(x.fromE) || "—"} → <b>${fd(x.toS) || "—"} a ${fd(x.toE) || "—"}</b></div>`).join("");
+      const txt = ch ? ch + (l.from && l.to && l.from !== l.to ? `<div>Plazo del requerimiento: ${fd(l.from)} → ${fd(l.to)}</div>` : "") + `<div>Motivo: ${esc(l.reason)}</div>` : (l.from || l.to) ? `${fd(l.from)} → ${fd(l.to)}: ${esc(l.reason)}` : esc(l.reason);
+      const ow = (l.overlaps || []).map(o => `<div class="ovw">⚠ Se aceptó el solapamiento de «${esc(o.a)}» (${fd(o.aS)} a ${fd(o.aE)}) con «${esc(o.b)}» (${fd(o.bS)} a ${fd(o.bE)})${o.why ? `<br>Motivo: ${esc(o.why)}` : ""}</div>`).join("");
+      return `<div class="dl"><small>${new Date(l.at).toLocaleString("es")} · <b>${esc(l.by)}</b></small><br>${txt}${ow}</div>`;
+    }).join("") + pend.map(o => `<div class="dl pend"><small><b>Ahora</b> · pendiente de guardar</small><div class="ovw">⚠ Se aceptó el solapamiento de «${esc(o.a)}» (${fd(o.aS)} a ${fd(o.aE)}) con «${esc(o.b)}» (${fd(o.bS)} a ${fd(o.bE)})${o.why ? `<br>Motivo: ${esc(o.why)}` : ""}</div></div>`).join("");
+    const html = `<details class="cbx"${commitOpen ? " open" : ""}><summary>${sum}</summary>${body}</details>`;
+    boxes.forEach(b => {
+      b.hidden = false; b.innerHTML = html; b.classList.toggle("hasov", ov.length > 0);      // con solapamiento, el recuadro parpadea en rojo
+      const dt = b.querySelector("details.cbx");
+      dt.addEventListener("toggle", () => { commitOpen = dt.open; boxes.forEach(o => { const x = o.querySelector("details.cbx"); if (x && x.open !== dt.open) x.open = dt.open; }); });
+    });
   }
-  function syncType() {
-    $("#actsBox").hidden = false; $("#pctRow").hidden = true; $("#datesRow").hidden = true;
+  function syncType() { $("#pctRow").hidden = true; $("#datesRow").hidden = true; }
+  // ---- asistente de 4 pasos: 1 Datos · 2 Actividades · 3 Entregables · 4 Métricas ----
+  function goStep(n) {
+    const from = step; step = n; if (n === 1 && draft) renderCommit(); if (isNew) maxStep = Math.max(maxStep, n);
+    $("#s1").hidden = n !== 1; $("#wideCol").hidden = n === 1; $("#actsBox").hidden = n !== 2; $("#delBox").hidden = n !== 3; $("#metBox").hidden = n !== 4;
+    document.querySelectorAll("#steps button").forEach(b => { const k = +b.dataset.step; b.classList.toggle("on", k === n); b.classList.toggle("done", isNew && k < n); b.disabled = isNew && k > maxStep; if (k === n) b.setAttribute("aria-current", "step"); else b.removeAttribute("aria-current"); });
+    const last = n === 4;
+    $("#rPrev").hidden = !isNew || n === 1; $("#rNext").hidden = !isNew || last;
+    $("#rCancel").hidden = isNew && !last; $("#rSave").hidden = readOnly || (isNew && !last); $("#rDelete").hidden = readOnly || isNew;
+    if (n === 2 && from === 1 && isNew && !actsRespTouched) { draft.acts.forEach(x => setIds(x, ids(draft))); renderActs(); }   // los responsables QA elegidos pasan solos a las actividades
+    $("#dlg .rgrid").scrollTop = 0;
+    if (n === 2) autosize($("#actTbl"));
+  }
+  async function nextStep() {
+    readForm(); $("#rform").querySelectorAll(".bad").forEach(el => el.classList.remove("bad"));
+    if (stepCheck(step)) { ($("#rform").querySelector(".ferr:not([hidden])") || $("#rform").querySelector(".bad"))?.scrollIntoView({ block: "center" }); return; }
+    goStep(step + 1);
   }
   function readForm() {
     const f = $("#rform");
     for (const k of ["clientId", "code", "title", "type", "status", "start", "end", "priority"]) draft[k] = f[k].value;
     draft.aranda = f.aranda.value.trim();
-    draft.bucket = f.bucket.value.trim();
+    draft.branch = f.branch.value;
     draft.percent = Math.min(100, Math.max(0, +f.percent.value || 0));
   }
   function renderActs() {
-    $("#actTbl").innerHTML = `<thead><tr><th>Actividad <span class="star">*</span></th><th>Resp. QA</th><th>Inicio <small class="opt">(opcional)</small></th><th>Fin <small class="opt">(opcional)</small></th><th>% Avance</th><th>Bloqueado <small class="opt">(opcional)</small></th><th></th></tr></thead><tbody>` +
-      draft.acts.map((a, i) => `<tr><td><textarea class="grow" rows="1" required maxlength="500" data-i="${i}" data-f="name">${esc(a.name)}</textarea></td><td>${memberPick(`data-ai="${i}"`, ids(a), readOnly)}</td>
+    const full = !isNew;   // al crear, fechas, % de avance y bloqueo se gestionan después, con el requerimiento ya creado
+    $("#actTbl").innerHTML = `<thead><tr><th>Actividad <span class="star">*</span></th><th>Resp. QA</th>${full ? '<th>Inicio <small class="opt">(opcional)</small></th><th>Fin <small class="opt">(opcional)</small></th><th>% Avance</th><th>Bloqueado <small class="opt">(opcional)</small></th>' : ""}<th></th></tr></thead><tbody>` +
+      draft.acts.map((a, i) => `<tr><td><textarea class="grow" rows="1" required maxlength="500" data-i="${i}" data-f="name">${esc(a.name)}</textarea></td><td>${memberPick(`data-ai="${i}"`, ids(a), readOnly)}</td>` + (full ? `
         <td><input type="date" data-i="${i}" data-f="start" value="${a.start}"></td><td><input type="date" data-i="${i}" data-f="end" value="${a.end}"></td>
         <td><select data-i="${i}" data-f="percent" title="% de avance de la actividad">${pctOpts(a.percent)}</select></td>
-        <td><input type="checkbox" data-i="${i}" data-f="blocked"${a.blocked ? " checked" : ""}></td><td>${readOnly ? "" : `<button type="button" data-rm="${i}" class="danger">✕</button>`}</td></tr>`).join("") + `</tbody>`;
+        <td><input type="checkbox" data-i="${i}" data-f="blocked"${a.blocked ? " checked" : ""}></td>` : "") + `<td class="nw">${readOnly ? "" : `<button type="button" data-rm="${i}" class="danger">✕</button>`}</td></tr>`).join("") + `</tbody>`;
     autosize($("#actTbl"));
     $("#actTbl").querySelectorAll("[data-f]").forEach(el => {
       el.disabled = readOnly;
-      el.onchange = () => { const a = draft.acts[+el.dataset.i], f = el.dataset.f; a[f] = f === "blocked" ? el.checked : f === "percent" ? +el.value : el.value; if (f === "blocked") { a.blockedSince = el.checked ? (a.blockedSince || today) : ""; if (!el.checked) a.blockReason = ""; } };
+      el.onchange = async () => {
+        const a = draft.acts[+el.dataset.i], f = el.dataset.f;
+        if (f === "percent") {                                   // regla de secuencia entre actividades
+          const p = +el.value, i = +el.dataset.i, mg = timeManaged(draft), chk = p > 0 && a.percent === 0 ? startCheck(draft.acts, i, mg) : p < a.percent ? lowerCheck(draft.acts, i, p, mg) : { ok: true };
+          if (!chk.ok) { el.value = a.percent; return say(chk.why, 1); }
+          setTimeout(syncActRules, 0);
+        }
+        if ((f === "start" || f === "end") && !isNew) {            // ¿las nuevas fechas se solapan con otra actividad?
+          const i = +el.dataset.i, prev = a[f], cand = { ...a, [f]: el.value };
+          if (cand.start && cand.end && cand.end >= cand.start && !badDate(cand.start) && !badDate(cand.end)) {
+            const hit = draft.acts.filter((o, k) => k !== i && hasD(o) && o.end >= o.start && cand.start <= o.end && o.start <= cand.end);
+            if (hit.length) {
+              const msg = `La actividad «${a.name}»\n      ${fd(cand.start)} a ${fd(cand.end)}\n\nse solapa con:\n${hit.map(o => `   •  «${o.name}»\n      ${fd(o.start)} a ${fd(o.end)}`).join("\n")}\n\n¿Aceptas que estas actividades se solapen?`;
+              let why = null;                                          // el solapamiento exige un motivo (mínimo 10 letras)
+              for (;;) {
+                why = await askText(msg + "\n\nEscribe el motivo para aceptar el solapamiento (mínimo 10 letras):", "", { title: "Actividades solapadas", ok: "Aceptar solapamiento", cancel: "Cancelar", wide: true, placeholder: "Motivo por el que estas actividades se solapan" });
+                if (why === null || nLetters(why) >= MIN_MOTIVE) break;
+                say("El motivo debe tener al menos 10 letras.", 1);
+              }
+              if (why === null) { el.value = prev || ""; syncTimeBtn(); return; }   // cancelar: vuelven las fechas anteriores
+              (draft.ovPending ||= []); hit.forEach(o => draft.ovPending.push({ a: a.name, aS: cand.start, aE: cand.end, b: o.name, bS: o.start, bE: o.end, why }));
+              a[f] = el.value; commitOpen = true; renderCommit();   // al aceptar, el recuadro se abre para que se vea el registro
+              if (timeManaged(draft) && !readOnly) { try { readForm(); await submitReqInner({ stay: true }); } catch (er) { console.error(er); say("No se pudo guardar: " + errText(er), 1); } }   // y se guarda de inmediato, sin presionar Guardar
+            }
+          }
+        }
+        a[f] = f === "blocked" ? el.checked : f === "percent" ? +el.value : el.value; if (f === "blocked") { a.blockedSince = el.checked ? (a.blockedSince || today) : ""; if (!el.checked) a.blockReason = ""; else say("Escribe en «Seguimiento / comentarios» el motivo del bloqueo (mínimo 10 letras): lo pediremos al guardar.", 1); } };
     });
     $("#actTbl").querySelectorAll("[data-ai]").forEach(cb => (cb.onchange = () => {
       const det = cb.closest("details"), l = [...det.querySelectorAll("[data-ai]:checked")].map(x => x.value);
-      setIds(draft.acts[+cb.dataset.ai], l); det.querySelector("summary").innerHTML = l.length ? chips(l.map(mname)) : "Sin asignar";
+      setIds(draft.acts[+cb.dataset.ai], l); actsRespTouched = true; det.querySelector("summary").innerHTML = l.length ? chips(l.map(mname)) : "Sin asignar";
     }));
+    $("#actTbl").querySelectorAll('[data-f="start"],[data-f="end"]').forEach(el => el.addEventListener("change", () => syncTimeBtn()));
+    syncTimeBtn(); syncActRules();
     $("#actTbl").querySelectorAll("[data-rm]").forEach(b => (b.onclick = async () => {
       const a = draft.acts[+b.dataset.rm]; if (!a) return;
       if (!await ask(`¿Quieres eliminar la actividad «${String(a.name || "sin nombre").slice(0, 80)}»?`, { title: "Eliminar actividad", ok: "Sí", cancel: "No", danger: true })) return;
       draft.acts.splice(+b.dataset.rm, 1); renderActs();
     }));
+  }
+  const actsDone = () => draft.acts.length > 0 && draft.acts.every(x => x.start && x.end && x.end >= x.start && !badDate(x.start) && !badDate(x.end));
+  function syncActRules() {                          // el % de una actividad que aún no puede iniciar queda bloqueado, con el motivo al pasar el mouse
+    if (isNew) return; const mg = timeManaged(draft);
+    $("#actTbl").querySelectorAll('select[data-f="percent"]').forEach(sel => { const i = +sel.dataset.i, x = draft.acts[i]; if (!x) return; const c = startCheck(draft.acts, i, mg); sel.disabled = readOnly || (!c.ok && x.percent === 0); sel.title = c.ok ? "% de avance de la actividad" : c.why; });
+  }
+  function syncTimeBtn() {                         // «Gestión del tiempo»: solo con requerimiento creado, con todas las fechas ingresadas, y una sola vez
+    const b = $("#btnTime"); if (!b) return; b.hidden = isNew || readOnly; if (b.hidden) return;
+    const done = timeManaged(draft), ok = actsDone();
+    b.disabled = done; b.textContent = done ? "⏱ Gestión del tiempo (realizada)" : "⏱ Gestión del tiempo";
+    b.title = done ? "Ya se usó: solo se puede una vez. Si cambias fechas, al guardar se pedirá el motivo del cambio de plazo." : ok ? "Confirma las fechas ingresadas como plazo comprometido (solo se puede una vez)" : "Primero ingresa inicio y fin de todas las actividades";
   }
   const DEL_ST = { pendiente: "Pendiente", entregado: "Entregado", validado: "Validado" };
   // ---- archivos adjuntos de los entregables ----
@@ -931,13 +1106,13 @@
   }
   function renderDel() {
     const t = $("#delTbl"); const al = $("#attLimits"); if (al) al.textContent = `hasta ${MAX_FILES} archivos por entregable, máximo ${fsize(MAX_FILE)} cada uno`;
-    t.innerHTML = `<thead><tr><th>Entregable</th><th>Fecha vencimiento</th><th>Estado</th><th>Enlace (SharePoint / DevOps)</th><th>Archivos adjuntos</th><th></th></tr></thead><tbody>` +
-      draft.deliverables.map((d, i) => `<tr><td><textarea class="grow" rows="1" data-di="${i}" data-df="name" maxlength="200">${esc(d.name)}</textarea></td><td><input type="date" data-di="${i}" data-df="due" value="${d.due || ""}"></td>
+    t.innerHTML = `<thead><tr><th>Entregable</th>${isNew ? "" : "<th>Fecha de Entrega</th>"}<th>Estado</th><th>Enlace (SharePoint / DevOps)</th><th>Archivos adjuntos</th><th></th></tr></thead><tbody>` +
+      draft.deliverables.map((d, i) => `<tr><td><textarea class="grow" rows="1" data-di="${i}" data-df="name" maxlength="200">${esc(d.name)}</textarea></td>${isNew ? "" : `<td><input type="date" data-di="${i}" data-df="due" value="${d.due || ""}"></td>`}
         <td><select data-di="${i}" data-df="state">${Object.entries(DEL_ST).map(([k, v]) => `<option value="${k}"${k === d.state ? " selected" : ""}>${v}</option>`).join("")}</select></td>
         <td><input type="url" data-di="${i}" data-df="url" value="${esc(d.url || "")}" placeholder="https://..."></td>
         <td>${fileCell(d, i)}</td>
         <td>${readOnly && !d._tmp ? "" : `<button type="button" class="danger" data-drm="${i}" aria-label="Eliminar entregable">✕</button>`}</td></tr>`).join("") + "</tbody>";
-    autosize(t); hideFtip();
+    t.classList.toggle("nodue", isNew); autosize(t); hideFtip();
     t.querySelectorAll(".fchip").forEach(c => {
       const [i, k] = c.dataset.fi.split(".").map(Number), show = () => showFtip(c, draft.deliverables[i]?.files?.[k]);
       c.addEventListener("mouseenter", show); c.addEventListener("focusin", show); c.addEventListener("mouseleave", hideFtip); c.addEventListener("focusout", hideFtip);
@@ -1094,60 +1269,123 @@
     if (!isNew) { const id = draft.id; commit(s => { const r = s.reqs.find(x => x.id === id); if (r && !r.comments.some(k => k.id === cm.id)) { r.comments.push(cm); r.lastUpdate = cm.at; } }); render(); }
     $("#newComment").value = ""; syncCm(); renderThread();
   }
+  async function remindDates() {                     // requerimiento creado con actividades sin todas sus fechas: se recuerda; si ya están ingresadas, no se dice nada
+    if (isNew || readOnly || timeManaged(draft) || actsDone()) return true;
+    readForm();
+    return ask("Recuerda ingresar la fecha de inicio y de fin de todas las actividades y luego presionar «Gestión del tiempo».", { title: "Faltan las fechas de las actividades", ok: "Entendido", cancel: "Ingresar fechas ahora" });
+  }
   async function submitReq(e) {
     e.preventDefault();
     if (readOnly) return say("Estás en modo solo lectura: no tienes permiso para guardar cambios.", 1);
+    if (!isNew && !timeManaged(draft) && draft.acts.some(x => x.start || x.end)) {   // fechas ingresadas sin «Gestión del tiempo»: nunca se guardan sueltas
+      const clear = () => { draft.acts.forEach(x => { x.start = ""; x.end = ""; }); renderActs(); say("Las fechas volvieron a quedar vacías."); };
+      if (actsDone()) {
+        const go = await ask("Para continuar debes presionar «Gestión del tiempo»: así quedan guardadas las fechas de las actividades. Si no lo haces, presiona Cancelar y las fechas volverán a quedar vacías.", { title: "Gestión del tiempo", ok: "Gestión del tiempo", cancel: "Cancelar" });
+        if (go) await runTimeMgmt(true); else clear();
+      } else {
+        const go = await ask("Las fechas están incompletas. Para continuar ingresa inicio y fin de todas las actividades y presiona «Gestión del tiempo». Si no lo haces, presiona Cancelar y las fechas volverán a quedar vacías.", { title: "Gestión del tiempo", ok: "Completar fechas", cancel: "Cancelar" });
+        if (go) { goStep(2); $("#actTbl").querySelectorAll('[data-f="start"],[data-f="end"]').forEach(el => { const x = draft.acts[+el.dataset.i]; if (!x?.start || !x?.end) el.classList.add("bad"); }); } else clear();
+      }
+      return;
+    }
+    if (!await remindDates()) { goStep(2); return; }
     try { await submitReqInner(); } catch (err) { console.error(err); say("No se pudo guardar: " + errText(err), 1); }
   }
-  async function submitReqInner() {
-    readForm();
-    const form = $("#rform"), bad = [];
-    form.querySelectorAll(".bad").forEach(el => el.classList.remove("bad"));
+  const MIN_MOTIVE = 10, nLetters = s => (String(s || "").match(/[\p{L}\p{N}]/gu) || []).length;
+  const hasMotive = () => draft.comments.some(c => c.at >= openedAt && nLetters(c.text) >= MIN_MOTIVE);   // comentario escrito en esta sesión con al menos 10 letras
+  // revisa los campos obligatorios y de formato de un paso; devuelve cuántos errores marcó
+  function stepCheck(n) {
+    const form = $("#rform"), bad = [], HTTP_RE = /^https?:\/\//i;
     const mark = (el, why) => { if (!el) return; bad.push(why); if (why) fieldErr(el, why, bad.filter(Boolean).length > 1); else el.classList.add("bad"); };   // el mensaje sale arriba del propio campo
-    for (const [k, n] of [["clientId", "Cliente"], ["code", "Código Requerimiento"], ["title", "Título Requerimiento"]]) if (!String(draft[k] || "").trim()) mark(form[k], `${n} es obligatorio`);
-    const was = store.reqs.find(r => r.id === draft.id);        // un código o título antiguo con símbolos no obliga a cambiarlos mientras no se editen
-    if (String(draft.code || "").trim() && (isNew || draft.code !== was?.code) && !CODE_RE.test(draft.code)) mark(form.code, "El código debe ser 1 letra seguida de hasta 8 números, sin símbolos (ejemplo: R1903)");
-    if (draft.aranda && !ARANDA_RE.test(draft.aranda)) mark(form.aranda, "Aranda(s) solo admite números, del 1 al 999999999");
-    if (String(draft.title || "").trim() && (isNew || draft.title !== was?.title) && !TITLE_RE.test(draft.title)) mark(form.title, "El título solo admite letras, números, espacios y estos signos: ( ) # $ / -");
-    if (String(draft.bucket || "").trim() && (isNew || draft.bucket !== was?.bucket) && !STAGE_RE.test(draft.bucket)) mark(form.bucket, "La etapa del proyecto solo admite letras y espacios (sin números, símbolos ni caracteres especiales)");
-    const HTTP_RE = /^https?:\/\//i;
-    const wiUrl = form.querySelector('[data-m="wiUrl"]'); if (wiUrl && (!wiUrl.checkValidity() || (wiUrl.value.trim() && !HTTP_RE.test(wiUrl.value.trim())))) mark(wiUrl, "El enlace al work item debe comenzar con https://");
-    form.querySelectorAll('[data-df="url"]').forEach((el, i) => { if (el.value.trim() && (!el.checkValidity() || !HTTP_RE.test(el.value.trim()))) mark(el, `Entregable ${i + 1}: el enlace debe comenzar con https://`); });
-    { const mv = k => { const el = form.querySelector(`[data-m="${k}"]`); return el && el.value !== "" ? +el.value : null; }, dsg = mv("designed"), exe = mv("executed"), pas = mv("passed"), fal = mv("failed"), aut = mv("automated");
+    const was = store.reqs.find(r => r.id === draft.id);        // un dato antiguo con símbolos no obliga a cambiarlo mientras no se edite
+    if (n === 1) {
+      if (!String(draft.clientId || "").trim()) mark(form.clientId, `${clientLabel()} es obligatorio`);
+      if ((isNew || was?.branch) && !draft.branch) mark(form.branch, "Sucursal es obligatoria");
+      if (!draft.type) mark(form.type, "Tipo Actividad es obligatorio" + (draft.branch ? "" : ": elige primero la sucursal"));
+      if (!String(draft.code || "").trim()) mark(form.code, "Código Requerimiento es obligatorio");
+      else if ((isNew || draft.code !== was?.code) && !CODE_RE.test(draft.code)) mark(form.code, "El código debe ser 1 letra seguida de hasta 8 números, sin símbolos (ejemplo: R1903)");
+      if (draft.aranda && !ARANDA_RE.test(draft.aranda)) mark(form.aranda, "Aranda(s) solo admite números, del 1 al 999999999");
+      if (!String(draft.title || "").trim()) mark(form.title, "Título Requerimiento es obligatorio");
+      else if ((isNew || draft.title !== was?.title) && !TITLE_RE.test(draft.title)) mark(form.title, "El título solo admite letras, números, espacios y estos signos: ( ) # $ / -");
+      if ((isNew || (was?.leaderIds || []).length) && !leaderIds(draft).length) mark($("#leaderPick"), "Selecciona al menos un Responsable del requerimiento");
+    }
+    if (n === 2) {
+      if (!draft.acts.length) { mark($("#btnActAdd"), "Agrega al menos una actividad"); mark($("#actTbl"), ""); }
+      draft.acts.forEach((a, i) => {
+        const row = $("#actTbl").querySelector(`tbody tr:nth-child(${i + 1})`), at = f => row?.querySelector(`[data-f="${f}"]`) || $("#actTbl");
+        if (!String(a.name || "").trim()) mark(at("name"), `Actividad ${i + 1}: el nombre es obligatorio`);
+        if (String(a.name || "").length > 500) mark(at("name"), `Actividad ${i + 1}: el nombre no puede superar los 500 caracteres`);
+        if (a.start && badDate(a.start)) mark(at("start"), DATE_ERR); if (a.end && badDate(a.end)) mark(at("end"), DATE_ERR);
+        if ((a.start && !a.end) || (!a.start && a.end)) mark(at(a.start ? "end" : "start"), `Actividad ${i + 1}: completa inicio y fin, o deja las dos fechas vacías`);
+        if (a.start && a.end && a.end < a.start) { mark(at("end"), `Actividad ${i + 1}: la fecha de fin es anterior al inicio`); mark(at("start"), ""); }
+      });
+    }
+    if (n === 3) form.querySelectorAll('[data-df="url"]').forEach((el, i) => { if (el.value.trim() && (!el.checkValidity() || !HTTP_RE.test(el.value.trim()))) mark(el, `Entregable ${i + 1}: el enlace debe comenzar con https://`); });
+    if (n === 4) {
+      const wiUrl = form.querySelector('[data-m="wiUrl"]'); if (wiUrl && (!wiUrl.checkValidity() || (wiUrl.value.trim() && !HTTP_RE.test(wiUrl.value.trim())))) mark(wiUrl, "El enlace al work item debe comenzar con https://");
+      const mv = k => { const el = form.querySelector(`[data-m="${k}"]`); return el && el.value !== "" ? +el.value : null; }, dsg = mv("designed"), exe = mv("executed"), pas = mv("passed"), fal = mv("failed"), aut = mv("automated");
       const q = k => form.querySelector(`[data-m="${k}"]`);
       if (dsg != null && exe != null && exe > dsg) mark(q("executed"), "Casos ejecutados no puede ser mayor que los diseñados");
       if (exe != null && (pas || 0) + (fal || 0) > exe) mark(q("passed"), "Aprobados + fallidos no puede superar los casos ejecutados");
-      if (dsg != null && aut != null && aut > dsg) mark(q("automated"), "Automatizados no puede ser mayor que los casos diseñados"); }
-    if (!draft.acts.length) { mark($("#btnActAdd"), "Agrega al menos una actividad"); mark($("#actTbl"), ""); }
-    form.querySelectorAll('input[type="date"]').forEach(el => { if (el.value && el.offsetParent !== null && badDate(el.value)) mark(el, DATE_ERR); });
-    // fechas opcionales: si se dejan vacías se completan con la actividad anterior (inicio) o con el inicio (fin)
-    draft.acts.forEach((a, i) => {
-      if (!a.start) a.start = i ? addDays(draft.acts[i - 1].end || draft.acts[i - 1].start, 1) : (draft.start || today);
-      if (!a.end) a.end = a.start;
+      if (dsg != null && aut != null && aut > dsg) mark(q("automated"), "Automatizados no puede ser mayor que los casos diseñados");
+    }
+    return bad.length;
+  }
+  async function submitReqInner(opts = {}) {            // opts.stay: guarda sin cerrar la ventana (solapamiento aceptado)
+    readForm();
+    const form = $("#rform");
+    form.querySelectorAll(".bad").forEach(el => el.classList.remove("bad"));
+    draft.acts.forEach(a => {                                    // fechas opcionales: vacías se completan con la actividad anterior (inicio) o con el inicio (fin)
+      const i = draft.acts.indexOf(a);
+      if (timeManaged(draft)) {
+        if (!a.start) a.start = i ? addDays(draft.acts[i - 1].end || draft.acts[i - 1].start, 1) : (draft.start || today);
+        if (!a.end) a.end = a.start;
+      }
       if (a.percent >= 100) { a.blocked = false; a.blockReason = ""; a.blockedSince = ""; }   // una actividad terminada no queda bloqueada
-      const row = $("#actTbl").querySelector(`tbody tr:nth-child(${i + 1})`);
-      if (!String(a.name || "").trim()) mark(row?.querySelector('[data-f="name"]'), `Actividad ${i + 1}: el nombre es obligatorio`);
-      if (String(a.name || "").length > 500) mark(row?.querySelector('[data-f="name"]'), `Actividad ${i + 1}: el nombre no puede superar los 500 caracteres`);
-      if (a.end < a.start) { mark(row?.querySelector('[data-f="end"]'), `Actividad ${i + 1}: la fecha de fin es anterior al inicio`); mark(row?.querySelector('[data-f="start"]'), ""); }
     });
-    if (bad.length) { (form.querySelector(".ferr:not([hidden])") || form.querySelector(".bad"))?.scrollIntoView({ block: "center" }); return; }
+    let first = 0; for (const n of [1, 2, 3, 4]) if (stepCheck(n) && !first) first = n;
+    if (first) { if (opts.stay) { say("No se pudo guardar el cambio: hay campos con error. Revísalos y presiona Guardar.", 1); return; } goStep(first); (form.querySelector(".ferr:not([hidden])") || form.querySelector(".bad"))?.scrollIntoView({ block: "center" }); return; }
+    const wasR = store.reqs.find(r => r.id === draft.id);
+    if (wasR) {                                                   // bloquear una actividad, o soltar un requerimiento bloqueado que aún tiene actividades bloqueadas, exige dejar el motivo en Seguimiento
+      const newly = draft.acts.some(x => x.blocked && !wasR.acts.find(y => y.id === x.id)?.blocked), unlock = wasR.status === "Bloqueado" && draft.status !== "Bloqueado" && draft.acts.some(x => x.blocked);
+      if (newly || unlock) {
+        const nc = $("#newComment");
+        if (!hasMotive() && nLetters(nc.value) >= MIN_MOTIVE) await addComment();   // si ya escribió el motivo pero no presionó «Agregar comentario», se agrega solo
+        if (!hasMotive()) { fieldErr(nc, newly ? "Escribe aquí el motivo del bloqueo de la actividad (mínimo 10 letras) y presiona «Agregar comentario»." : "Escribe aquí el motivo del cambio de estado (mínimo 10 letras) y presiona «Agregar comentario».", true); nc.classList.add("bad"); nc.scrollIntoView({ block: "center" }); nc.focus(); return; }
+      }
+    }
     [draft.start, draft.end] = span(draft);
-    const prev = store.reqs.find(r => r.id === draft.id), manual = !!prev && prev.status !== draft.status;   // si elegiste el estado a mano, se respeta
+    if (isNew) { draft.createdAt = new Date().toISOString(); draft.createdBy = authorName(); }   // trazabilidad: fecha y hora de creación
+    stampActual(draft);
+    const prev = store.reqs.find(r => r.id === draft.id), manual = !!prev && prev.status !== draft.status;
+    if (isNew) draft.status = ids(draft).length ? "Pendiente" : "Sin Asignación"; else if (!manual && draft.status === "Sin Asignación" && ids(draft).length) draft.status = "Pendiente";   // sin responsable QA al crear: «Sin Asignación»   // si elegiste el estado a mano, se respeta
     { const p = progress(draft), anyB = draft.acts.some(a => a.blocked); draft.percent = p;
       if (!manual) { if (p >= 100) draft.status = "Completado"; else if (anyB) draft.status = "Bloqueado"; else if (draft.status === "Bloqueado") draft.status = p > 0 ? "En curso" : "Pendiente"; else if (p > 0 && draft.status === "Pendiente") draft.status = "En curso"; } }
     if (draft.status === "Completado" && !draft.completedAt) draft.completedAt = today;
     if (draft.status !== "Completado") draft.completedAt = "";
     const old = store.reqs.find(r => r.id === draft.id);
     draft.dateLog ||= []; draft.lastUpdate = new Date().toISOString();
-    if (!old || !draft.committedEnd) draft.committedEnd = draft.end;
-    if (old && old.end !== draft.end) {
-      const why = await askReason(`${draft.code}: el plazo cambia de ${fd(old.end)} a ${fd(draft.end)}.`); if (why === null) return;
-      draft.dateLog = [...draft.dateLog, { at: draft.lastUpdate, by: authorName(), from: old.end, to: draft.end, reason: why }];
+    if (timeManaged(draft) && !draft.committedEnd) draft.committedEnd = draft.end;
+    const actChgs = old ? draft.acts.map(x => { const o = old.acts.find(y => y.id === x.id); return o && (o.start || o.end) && (o.start !== x.start || o.end !== x.end) ? { name: x.name, fromS: o.start, fromE: o.end, toS: x.start, toE: x.end } : null; }).filter(Boolean) : [];
+    const ovs = (draft.ovPending || []).map(o => ({ ...o })); let logged = false;
+    if (old && timeManaged(old) && (old.end !== draft.end || actChgs.length)) {   // plazo ya comprometido: cualquier cambio de fechas pide su motivo
+      const ovWhy = [...new Set(ovs.map(o => o.why).filter(Boolean))].join(" / ");   // si ya dio el motivo del solapamiento, ese mismo es el motivo del cambio de plazo
+      const why = ovWhy || await askReason(old.end !== draft.end ? `${draft.code}: el plazo cambia de ${fd(old.end)} a ${fd(draft.end)}.` : `${draft.code}: cambiaron las fechas de ${actChgs.map(x => "«" + x.name + "»").join(", ")}.`); if (why === null) return;
+      draft.dateLog = [...draft.dateLog, { at: draft.lastUpdate, by: authorName(), from: old.end, to: draft.end, reason: why, changes: actChgs, overlaps: ovs }]; logged = true;
+    }
+    if (ovs.length && !logged) draft.dateLog = [...draft.dateLog, { at: draft.lastUpdate, by: authorName(), from: "", to: "", reason: "Se aceptó el solapamiento de actividades.", changes: actChgs, overlaps: ovs }];
+    delete draft.ovPending;
+    const delChg = old ? (old.deliverables || []).map(od => { const nd = draft.deliverables.find(x => x.id === od.id); return nd && od.due && nd.due !== od.due ? { name: nd.name, from: od.due, to: nd.due } : null; }).filter(Boolean) : [];
+    if (delChg.length) {                                                       // cambio de Fecha de Entrega: motivo obligatorio, queda como comentario de seguimiento
+      const lst = delChg.map(x => `«${x.name}» ${fd(x.from)} → ${fd(x.to) || "sin fecha"}`).join("; ");
+      const why = await askReason(`Cambiaste la Fecha de Entrega: ${lst}. ¿Por qué cambia?`); if (why === null) return;
+      draft.comments.push({ id: uid(), at: new Date().toISOString(), by: authorName(), byEmail: boot.user || "", text: `Cambio de Fecha de Entrega — ${lst}. Motivo: ${why}` });
     }
     draft.deliverables = (draft.deliverables || []).filter(d => !d._tmp);
     const i = store.reqs.findIndex(r => r.id === draft.id);
-    i < 0 ? store.reqs.push(draft) : (store.reqs[i] = draft);
+    i < 0 ? store.reqs.push(opts.stay ? JSON.parse(JSON.stringify(draft)) : draft) : (store.reqs[i] = opts.stay ? JSON.parse(JSON.stringify(draft)) : draft);   // con stay se guarda una copia: la ventana sigue editando el borrador
     save(); if (rmQueue.length) { D.fileRemove(rmQueue).catch(() => {}); rmQueue = []; }
+    if (opts.stay) { openSnap = JSON.stringify(draft); render(); renderCommit(); say("Solapamiento aceptado y guardado ✓"); return; }
     $("#dlg").close(); say("Guardado ✓"); render();
   }
 
@@ -1180,7 +1418,7 @@
   const clientLabel = () => (store.clientLabel || "").trim() || "Clientes/Departamentos";
   function applyClientLabel() {
     const l = clientLabel(), tab = $('#tabs [data-v="clients"]'), inp = $("#clientLabelIn");
-    $("#clientLblTxt").textContent = l; $("#clientsTitle").textContent = l; if (tab) tab.textContent = l;
+    $("#clientLblTxt").textContent = l; $("#clientsTitle").textContent = l; { const lc = $("#lblClient"); if (lc) lc.firstChild.textContent = l + " "; } if (tab) tab.textContent = l;
     if (document.activeElement !== inp) inp.value = store.clientLabel || "";
   }
   $("#clientLabelForm").onsubmit = e => {
@@ -1268,7 +1506,7 @@
   const KPI_EVERY = 120000;                                              // actualización automática: cada 2 minutos
   const WD = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"], SC = { g: "#2e9e6a", y: "#e0b81b", r: "#d6394a" };
   let kpiFilter = "";
-  const createdOf = r => String(r.createdAt || span(r)[0] || today).slice(0, 10);
+  const createdOf = r => (String(r.createdAt || "").includes("T") ? ldate(r.createdAt) : String(r.createdAt || span(r)[0] || today).slice(0, 10));
   const closedOf = r => (r.status === "Completado" ? String(r.completedAt || ldate(r.lastUpdate) || today).slice(0, 10) : "");
   const dueOf = r => span(r)[1];
   const isOpen = r => r.status !== "Completado";
@@ -1359,7 +1597,7 @@
     $("#kpiFilt").innerHTML = kpiFilter ? `<span class="kchip">Filtro: ${FL[kpiFilter][0]} · ${rows.length} <button type="button" id="kpiClr" aria-label="Quitar filtro">✕ Quitar filtro</button></span>` : `<span class="muted">Ordenados por urgencia: atrasados, luego los que vencen pronto con poco avance. Toca un KPI de arriba para filtrar esta lista; toca una fila para abrir el requerimiento.</span>`;
     const hc = clientId === "all";
     $("#kpiTbl").innerHTML = `<thead><tr><th></th><th>Requerimiento</th>${hc ? "<th>Cliente</th>" : ""}<th>Responsable</th><th>Vence</th><th>Plazo</th><th>Avance</th><th>Motivo</th></tr></thead><tbody>` + (rows.length ? rows.map(r => {
-      const d = daysTo(r), st = isOpen(r) ? kStat(r) : "d", p = progress(r), pz = !isOpen(r) ? `cerrado ${fd(closedOf(r))}` : d < 0 ? `${lvlTxt(-d)} de atraso` : d === 0 ? "hoy" : `en ${d} d`;
+      const d = daysTo(r), st = isOpen(r) ? kStat(r) : "d", p = progress(r), pz = !isOpen(r) ? `cerrado ${fd(closedOf(r))}` : isNaN(d) ? "sin fechas" : d < 0 ? `${lvlTxt(-d)} de atraso` : d === 0 ? "hoy" : `en ${d} d`;
       return `<tr data-open="${r.id}"><td><span class="dot ${st}" title="${{ r: "Atrasado", y: "En riesgo", g: "En plazo", d: "Cerrado" }[st]}"></span></td><td class="rq"><b>${esc(r.code)}</b>${r.aranda ? ` <small class="muted">Aranda(s) ${esc(r.aranda)}</small>` : ""} · ${esc(r.title)}</td>${hc ? `<td>${esc(clientName(r.clientId))}</td>` : ""}<td>${esc(mnames(r))}</td><td class="nw">${fd(dueOf(r))}</td><td class="nw">${pz}</td><td><span class="pbar"><i style="width:${p}%"></i><span>${p}%</span></span></td><td>${esc(isOpen(r) ? kReason(r) : "cerrado fuera de plazo")}</td></tr>`;
     }).join("") : `<tr><td colspan="${hc ? 8 : 7}" class="muted" style="padding:14px">${kpiFilter ? "Nada en esta lista." : "Nada requiere atención ahora. Todo en plazo 👌"}</td></tr>`) + "</tbody>";
     $("#kpiTbl").querySelectorAll("[data-open]").forEach(x => (x.onclick = () => openReq(x.dataset.open)));
@@ -1501,7 +1739,7 @@
 
   // ---------- Exportar carta Gantt ----------
   function ganttHtml(forPrint, pick, detail) {
-    const list = (pick || visible()).slice().sort((x, y) => clientName(x.clientId).localeCompare(clientName(y.clientId)) || x.code.localeCompare(y.code));
+    const list = (pick || visible()).slice().filter(r => span(r)[0] && span(r)[1]).sort((x, y) => clientName(x.clientId).localeCompare(clientName(y.clientId)) || x.code.localeCompare(y.code));
     if (!list.length) return null;
     const all = list.flatMap(r => span(r)).concat(today).map(d2n);
     const lastD = new Date(Math.max(...all) * DAY);
@@ -1509,16 +1747,16 @@
     let mode = ["day", "week", "month"].includes(detail) ? detail : (max - min > 100 ? "week" : "day"), fellBack = false;
     const build = m => {                                                      // columnas [desde, hasta] según el nivel de detalle
       const out = [];
-      if (m === "day") for (let n = min; n <= max; n++) out.push([n, n]);
+      if (m === "day") for (let n = min; n <= max; n++) { if (isWk(n)) out.push([n, n]); }
       else if (m === "week") for (let n = min - ((new Date(min * DAY).getUTCDay() + 6) % 7); n <= max; n += 7) out.push([n, n + 6]);        // semanas de lunes a domingo
       else for (let d = new Date(min * DAY), n = Math.round(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) / DAY); n <= max;) { const q = new Date(n * DAY), nx = Math.round(Date.UTC(q.getUTCFullYear(), q.getUTCMonth() + 1, 1) / DAY); out.push([n, nx - 1]); n = nx; }
       return out;
     };
     let cols = build(mode);
     if (mode === "day" && cols.length > 400) { mode = "week"; cols = build(mode); fellBack = true; }   // por días solo cabe un rango razonable
-    const COL = { Completado: "#2e9e6a", "En curso": "#2f6fed", Bloqueado: "#e0a400", Atrasado: "#d6394a", Pendiente: "#9aa3b5" };
+    const COL = { Completado: "#2e9e6a", "En curso": "#2f6fed", Bloqueado: "#e0a400", Atrasado: "#d6394a", Pendiente: "#9aa3b5", "Sin Asignación": "#8e6bd1" };
     const tint = c => "#" + [1, 3, 5].map(i => Math.round(parseInt(c.slice(i, i + 2), 16) * 0.4 + 255 * 0.6).toString(16).padStart(2, "0")).join("");   // tono claro sólido: Excel ignora los colores con transparencia (#rrggbbaa)
-    const actSt = a => a.blocked ? "Bloqueado" : a.percent >= 100 ? "Completado" : a.end < today ? "Atrasado" : a.percent > 0 ? "En curso" : "Pendiente";
+    const actSt = a => a.blocked ? "Bloqueado" : a.percent >= 100 ? "Completado" : a.end && a.end < today ? "Atrasado" : a.percent > 0 ? "En curso" : "Pendiente";
     const reqSt = r => (late(r) && r.status !== "Bloqueado" && r.status !== "Completado") ? "Atrasado" : r.status;
     const grp = [];                                                          // fila superior: meses (por días/semanas) o años (por meses)
     cols.forEach(([n]) => { const d = new Date(n * DAY), k = mode === "month" ? String(d.getUTCFullYear()) : d.toLocaleDateString("es", { month: "short", year: "2-digit", timeZone: "UTC" }); const l = grp[grp.length - 1]; l && l.k === k ? l.n++ : grp.push({ k, n: 1 }); });
@@ -1526,21 +1764,41 @@
     const cell = ([n, to], s, e, pct, color) => {
       const today0 = d2n(today), isToday = today0 >= n && today0 <= to, wk = mode === "day" && [0, 6].includes(new Date(n * DAY).getUTCDay());
       const border = isToday ? "border-left:2px solid #d6394a;" : "";
-      if (e < n || s > to) return `<td style="${border}${wk ? "background:#f0f0f0;" : ""}"></td>`;
+      const hol = mode === "day" && holidayName(n);
+      if (e < n || s > to) return `<td style="${border}${hol ? "background:#fff1a8;" : wk ? "background:#f0f0f0;" : ""}"></td>`;
       const len = e - s + 1, done = Math.round(pct / 100 * len), idx = Math.max(n, s) - s;
       return `<td style="${border}background:${idx < done ? color : tint(color)};"></td>`;
+    };
+    // fechas reales: verde = trabajo dentro de las fechas del responsable, amarillo oscuro = días adicionales hasta la entrega, gris = días libres por terminar antes
+    const actSegs = x => {
+      if (!x.end) return null;
+      const aS = x.actualStart && x.start && x.actualStart < x.start ? x.actualStart : x.start;
+      const realEnd = x.percent >= 100 && x.actualEnd ? x.actualEnd : (x.percent < 100 && x.actualStart && x.end < today ? today : "");
+      if (!realEnd) return null;
+      const segs = [];
+      if (aS <= x.end) segs.push({ s: d2n(aS), e: d2n(realEnd < x.end ? realEnd : x.end), color: "#2e9e6a" });
+      if (realEnd > x.end) segs.push({ s: Math.max(d2n(aS), d2n(x.end) + 1), e: d2n(realEnd), color: "#e0b81b" });
+      if (x.percent >= 100 && realEnd < x.end) segs.push({ s: d2n(realEnd) + 1, e: d2n(x.end), color: "#dcdcdc" });
+      return segs;
+    };
+    const cellSegs = ([n, to], segs) => {
+      const today0 = d2n(today), border = today0 >= n && today0 <= to ? "border-left:2px solid #d6394a;" : "";
+      let best = null, bestLen = 0;
+      for (const sg of segs) { const len = Math.min(sg.e, to) - Math.max(sg.s, n) + 1; if (len > bestLen || (len === bestLen && len > 0 && sg.color === "#e0b81b")) { best = sg; bestLen = len; } }
+      const hol = mode === "day" && holidayName(n);
+      return `<td style="${border}${best ? "background:" + best.color + ";" : hol ? "background:#fff1a8;" : ""}"></td>`;
     };
     const th = "background:#0b1220;color:#fff;font-weight:bold;text-align:center;border:1px solid #333;";
     let t = `<table border="1" cellspacing="0" cellpadding="3" style="border-collapse:collapse;font-family:Calibri,Arial,sans-serif;font-size:${forPrint ? 8 : 11}pt">
       <tr><td colspan="${9 + cols.length}" style="font-size:16pt;font-weight:bold;border:0">Carta Gantt QA — ${esc(clientId === "all" ? "Todos los clientes" : clientName(clientId))}</td></tr>
-      <tr><td colspan="${9 + cols.length}" style="border:0;color:#555">Generada el ${today} · Vista ${{ day: "por días", week: "por semanas", month: "por meses" }[mode]}${fellBack ? " (el rango era muy largo para verlo por días)" : ""} · Avance: tono fuerte = completado, tono claro = pendiente · Línea roja = hoy</td></tr>
+      <tr><td colspan="${9 + cols.length}" style="border:0;color:#555">Generada el ${today} · Vista ${{ day: "por días", week: "por semanas", month: "por meses" }[mode]}${fellBack ? " (el rango era muy largo para verlo por días)" : ""} · Avance: tono fuerte = completado, tono claro = pendiente · Línea roja = hoy · Solo días hábiles; amarillo claro = feriado en Chile · Verde = trabajo real dentro de las fechas del responsable · Amarillo oscuro = días adicionales hasta la entrega · Gris = días libres por terminar antes</td></tr>
       <tr>${["Cliente", "Requerimiento", "Actividad", "Responsable", "Inicio", "Fin", "Avance", "Estado", "Tipo"].map(x => `<td rowspan="2" style="${th}">${x}</td>`).join("")}${grp.map(m => `<td colspan="${m.n}" style="${th}">${esc(m.k)}</td>`).join("")}</tr>
-      <tr>${cols.map(c => `<td style="${th}font-size:${mode === "day" ? 8 : 7.5}pt">${esc(sub2(c))}</td>`).join("")}</tr>`;
-    const row = (cl, req, act, who, s, e, pct, st, tipo, bold) => `<tr style="${bold ? "font-weight:bold;background:#eef2fb;" : ""}"><td>${esc(cl)}</td><td>${esc(req)}</td><td>${esc(act)}</td><td>${esc(who)}</td><td style="white-space:nowrap">${esc(fd(s))}</td><td style="white-space:nowrap">${esc(fd(e))}</td><td style="text-align:center">${esc(pct)}%</td><td style="color:${COL[st]};font-weight:bold">${esc(st)}</td><td>${esc(tipo)}</td>${cols.map(c => cell(c, d2n(s), d2n(e), pct, COL[st])).join("")}</tr>`;
+      <tr>${cols.map(c => { const hn = mode === "day" ? holidayName(c[0]) : ""; return `<td${hn ? ` title="Feriado: ${esc(hn)}"` : ""} style="${th}font-size:${mode === "day" ? 8 : 7.5}pt${hn ? ";background:#ffd400;color:#000" : ""}">${esc(sub2(c))}</td>`; }).join("")}</tr>`;
+    const row = (cl, req, act, who, s, e, pct, st, tipo, bold, segs) => `<tr style="${bold ? "font-weight:bold;background:#eef2fb;" : ""}"><td>${esc(cl)}</td><td>${esc(req)}</td><td>${esc(act)}</td><td>${esc(who)}</td><td style="white-space:nowrap">${esc(fd(s))}</td><td style="white-space:nowrap">${esc(fd(e))}</td><td style="text-align:center">${esc(pct)}%</td><td style="color:${COL[st]};font-weight:bold">${esc(st)}</td><td>${esc(tipo)}</td>${cols.map(c => (segs ? cellSegs(c, segs) : cell(c, d2n(s), d2n(e), pct, COL[st]))).join("")}</tr>`;
     for (const r of list) {
       const [s, e] = span(r), p = progress(r), rs = reqSt(r), cn = clientName(r.clientId), nm = `${r.code} · ${r.title}`;
       t += row(cn, nm, r.acts.length ? "(resumen)" : "—", mnames(r), s, e, p, rs, typeName(r.type), true);
-      r.acts.forEach(a => (t += row("", "", a.name, mnames(a, r), a.start, a.end, a.percent, actSt(a), "", false)));
+      r.acts.filter(hasD).forEach(a => (t += row("", "", a.name, mnames(a, r), a.start, a.end, a.percent, actSt(a), "", false, actSegs(a))));
     }
     return t + "</table>";
   }
@@ -1627,25 +1885,45 @@
   $("#roleForm").onsubmit = e => { e.preventDefault(); if (readOnly) return; const v = e.target.role.value.trim(); if (!v) return fieldErr(e.target.role, "Escribe el nombre del rol."); if (store.roles.some(x => norm(x) === norm(v))) return fieldErr(e.target.role, "Ese rol ya existe."); store.roles.push(v); e.target.reset(); save(); render(); };
   $("#clientSel").onchange = e => { clientId = e.target.value; lsSet("qa-client", clientId); render(); };
   $("#clientForm").onsubmit = e => { e.preventDefault(); if (readOnly) return; const v = e.target.name.value.trim(); if (!v) return fieldErr(e.target.name, "Escribe el nombre del cliente."); if (store.clients.some(c => c.name.toLowerCase() === v.toLowerCase())) return fieldErr(e.target.name, "Ese cliente ya existe."); const c = { id: uid(), name: v }; store.clients.push(c); e.target.reset(); save(); clientId = c.id; lsSet("qa-client", clientId); render(); say("Cliente creado y seleccionado ✓"); };
-  document.querySelectorAll(".tplAdd").forEach(b => (b.onclick = () => { store.templates[b.dataset.k].push({ name: "Nueva actividad", days: 1, unit: "d" }); save(); renderTpl(); }));
-  document.querySelectorAll(".tplReset").forEach(b => (b.onclick = async () => { if (await ask("¿Restaurar esta plantilla por defecto?")) { store.templates[b.dataset.k] = D.defaultTemplates()[b.dataset.k]; save(); renderTpl(); } }));
+  $("#rform").branch.onchange = () => {                 // cambiar la sucursal reinicia el tipo de actividad: hay que elegirlo de nuevo
+    const f = $("#rform"), prev = draft.type; draft.branch = f.branch.value; draft.type = ""; renderTypeSel("");
+    if (prev && !isNew) say("Cambiaste la sucursal: vuelve a elegir el Tipo Actividad.", 1);
+  };
+  $("#rform").status.onchange = () => { const w = store.reqs.find(r => r.id === draft.id); if (w?.status === "Bloqueado" && $("#rform").status.value !== "Bloqueado" && draft.acts.some(x => x.blocked)) say("Para sacar el requerimiento de «Bloqueado» escribe el motivo en «Seguimiento / comentarios» (mínimo 10 letras): lo pediremos al guardar.", 1); };
+  $("#steps").onclick = e => { const b = e.target.closest("button[data-step]"); if (!b || b.disabled) return; const n = +b.dataset.step; if (n === step) return; if (isNew && n > step) return void nextStep(); goStep(n); };
+  $("#rNext").onclick = nextStep; $("#rPrev").onclick = () => goStep(step - 1);
   $("#rform").type.onchange = async () => {
     const prev = draft.type; readForm(); syncType();
     if (draft.type === prev) return;
-    const label = "QA " + typeName(draft.type);
+    const label = typeName(draft.type);
     const prevNames = JSON.stringify(tplFor(prev).map(t => t.name)), untouched = JSON.stringify(draft.acts.map(t => t.name)) === prevNames;
-    if (!draft.acts.length || untouched || await ask(`Cambiar a ${label} reemplaza las actividades actuales por las de su plantilla. ¿Continuar?`)) { draft.acts = fromTemplate(draft.acts[0]?.start || today); renderActs(); }
+    if (!draft.acts.length || (isNew && untouched) || await ask(`Cambiar a ${label} reemplaza las actividades actuales por las de su plantilla. ¿Continuar?`)) { draft.acts = fromTemplate(isNew || !timeManaged(draft) ? "" : (draft.acts[0]?.start || today)); renderActs(); }
     else { draft.type = prev; $("#rform").type.value = prev; syncType(); }
   };
   $("#hoyExpand").onclick = () => setHoyAll(false); $("#hoyCollapse").onclick = () => setHoyAll(true);
-  $("#btnActAdd").onclick = () => { const last = draft.acts[draft.acts.length - 1]; const s = last ? addDays(last.end, 1) : today; draft.acts.push({ id: uid(), name: "Nueva actividad", start: s, end: s, percent: 0, assigneeId: draft.assigneeId, assigneeIds: [...ids(draft)], blocked: false }); renderActs(); };
-  $("#btnDelAdd").onclick = () => { draft.deliverables.push({ id: uid(), name: "Nuevo entregable", due: span(draft)[1] || today, state: "pendiente", url: "", ...(readOnly ? { _tmp: true } : {}) }); renderDel(); };
+  $("#btnActAdd").onclick = () => { const last = draft.acts[draft.acts.length - 1]; const dated = !isNew && timeManaged(draft), s = dated ? (last?.end ? addDays(last.end, 1) : today) : ""; draft.acts.push({ id: uid(), name: "Nueva actividad", start: s, end: s, percent: 0, assigneeId: draft.assigneeId, assigneeIds: [...ids(draft)], blocked: false }); renderActs(); };
+  $("#btnDelAdd").onclick = () => { draft.deliverables.push({ id: uid(), name: "Nuevo entregable", due: isNew ? "" : (span(draft)[1] || today), state: "pendiente", url: "", ...(readOnly ? { _tmp: true } : {}) }); renderDel(); };
   $("#btnTplNew").onclick = async () => {
     if (readOnly) return;
     const name = ((await askText("Nombre del nuevo tipo de requerimiento (ej: QA Performance, Regresión):", "", { title: "Nuevo tipo" })) || "").trim(); if (!name) return;
     if ((store.customTpl ||= []).some(c => c.name.toLowerCase() === name.toLowerCase())) return say("Ya existe un tipo con ese nombre.", 1);
-    store.customTpl.push({ id: uid(), name, acts: [{ name: "Nueva actividad", days: 1, unit: "d" }] }); save(); renderTpl(); render(); say("Tipo creado ✓ (ya está disponible en el campo Tipo)");
+    store.customTpl.push({ id: uid(), name, acts: [{ name: "Nueva actividad", days: 1, unit: "d", dep: "prev", grp: "" }] }); save(); renderTpl(); render(); say("Tipo creado ✓ (ya está disponible en el campo Tipo)");
   };
+  async function runTimeMgmt(skipAsk) {
+    if (isNew || readOnly || timeManaged(draft)) return;
+    readForm();
+    if (!actsDone()) {                                  // pide completar las fechas y marca las que faltan
+      $("#actTbl").querySelectorAll('[data-f="start"],[data-f="end"]').forEach(el => { const x = draft.acts[+el.dataset.i]; if (!x?.start || !x?.end || x.end < x.start) el.classList.add("bad"); });
+      $("#actTbl").querySelector(".bad")?.scrollIntoView({ block: "center" });
+      return say("Para usar la Gestión del tiempo, primero ingresa la fecha de inicio y de fin de todas las actividades (el fin no puede ser anterior al inicio).", 1);
+    }
+    if (!skipAsk && !await ask("Las fechas ingresadas quedarán como el plazo comprometido del requerimiento. Después, cada cambio de fecha pedirá un motivo. Esto solo se puede hacer UNA vez. ¿Confirmas la gestión del tiempo?", { title: "Gestión del tiempo", ok: "Sí, confirmar", cancel: "No", wide: true })) return;
+    draft.timeManaged = true; draft.committedEnd = ""; draft.timeManagedAt = new Date().toISOString(); draft.timeManagedBy = authorName();
+    await submitReq({ preventDefault() {} });
+    if ($("#dlg").open) { draft.timeManaged = false; delete draft.timeManagedAt; delete draft.timeManagedBy; syncTimeBtn(); }   // no se pudo guardar: el botón sigue disponible
+    else say("Gestión del tiempo realizada ✓ Desde ahora, los cambios de fecha piden motivo.");
+  }
+  $("#btnTime").onclick = () => runTimeMgmt(false);
   $("#btnComment").onclick = addComment;
   const syncCm = () => { $("#btnComment").disabled = !$("#newComment").value.trim(); };   // «Agregar comentario» solo con texto
   $("#newComment").addEventListener("input", syncCm); syncCm();
@@ -1659,8 +1937,8 @@
   // campos inválidos (p. ej. Código/Título vacío, enlace mal escrito) bloquean el envío sin avisar si quedan fuera de vista
   ["input", "change"].forEach(t => $("#rform").addEventListener(t, ev => ev.target.classList?.remove("bad")));
   $("#rform").addEventListener("invalid", ev => { ev.preventDefault(); fieldErr(ev.target, ev.target.type === "date" ? DATE_ERR : ev.target.validationMessage, true); }, true);   // el aviso sale sobre el campo, no en un globo aparte
-  $("#rCancel").onclick = $("#rClose").onclick = async () => { if (dirtyReq() && !await ask("Tienes cambios sin guardar. ¿Descartarlos?")) return; $("#dlg").close(); };
-  $("#dlg").addEventListener("cancel", async e => { e.preventDefault(); if (!dirtyReq() || await ask("Tienes cambios sin guardar. ¿Descartarlos?", { title: "Cambios sin guardar", ok: "Descartar", danger: true })) $("#dlg").close(); });   // tecla Escape
+  $("#rCancel").onclick = $("#rClose").onclick = async () => { if (!await remindDates()) { goStep(2); return; } if (dirtyReq() && !await ask("Tienes cambios sin guardar. ¿Descartarlos?")) return; $("#dlg").close(); };
+  $("#dlg").addEventListener("cancel", async e => { e.preventDefault(); if (!await remindDates()) { goStep(2); return; } if (!dirtyReq() || await ask("Tienes cambios sin guardar. ¿Descartarlos?", { title: "Cambios sin guardar", ok: "Descartar", danger: true })) $("#dlg").close(); });   // tecla Escape
   $("#rDelete").onclick = async () => { if (await ask("¿Eliminar este requerimiento y su seguimiento?")) { store.reqs = store.reqs.filter(r => r.id !== draft.id); save(); $("#dlg").close(); render(); } };
 
   $("#btnLogout").onclick = D.logout;

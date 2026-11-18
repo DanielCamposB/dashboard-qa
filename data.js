@@ -7,30 +7,42 @@
   const addDays = (s, n) => { const d = new Date(s + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return iso(d); };
   const uid = () => crypto.randomUUID();
 
+  const tradActs = () => [
+    { name: "Análisis del requerimiento", days: 2, dep: "none", grp: "" },
+    { name: "Estimación del requerimiento", days: 1, dep: "prev", grp: "" },
+    { name: "Diseño de casos de prueba", days: 4, dep: "dates", grp: "" },
+    { name: "Preparación de ambiente y datos", days: 2, dep: "prev", grp: "" },
+    { name: "Ejecución de pruebas ciclo 1", days: 5, dep: "prev", grp: "Ejecución" },
+    { name: "Ejecución de pruebas ciclo 2", days: 3, dep: "prev", grp: "Ejecución" },
+    { name: "Ejecución de pruebas ciclo 3", days: 3, dep: "prev", grp: "Ejecución" },
+    { name: "Cierre (ECER)", days: 2, dep: "prev", grp: "" }
+  ];
+  // Reglas de avance de cada actividad: dep = none (libre) | prev (requiere la anterior al 100 %) | dates (además, requiere las fechas de «Gestión del tiempo»); grp = bloque de actividades alternativas
+  const ruleDefaults = list => (list || []).forEach((t, i) => { if (t.dep === undefined) t.dep = i === 0 ? "none" : /dise[ñn]o de casos/i.test(t.name) ? "dates" : "prev"; if (t.grp === undefined) t.grp = /ejecuci[oó]n de pruebas ciclo/i.test(t.name) ? "Ejecución" : ""; });
   const defaultTemplates = () => ({
-    trad: [
-      { name: "Análisis y comprensión del requerimiento", days: 2 },
-      { name: "Diseño de casos de prueba", days: 4 },
-      { name: "Preparación de ambiente y datos", days: 2 },
-      { name: "Ejecución de pruebas ciclo 1", days: 5 },
-      { name: "Gestión de defectos / ciclo 2", days: 3 },
-      { name: "Regresión", days: 3 },
-      { name: "Evidencias y cierre (EVP)", days: 2 }
-    ],
+    trad: tradActs(),
     express: [
-      { name: "Diseño de casos de prueba", days: 1 },
-      { name: "Ejecución", days: 2 },
-      { name: "Certificación", days: 1 },
-      { name: "Informe final", days: 1 }
-    ]
+      { name: "Diseño de casos de prueba", days: 1, dep: "none", grp: "" },
+      { name: "Ejecución", days: 2, dep: "prev", grp: "" },
+      { name: "Certificación", days: 1, dep: "prev", grp: "" },
+      { name: "Informe final", days: 1, dep: "prev", grp: "" }
+    ],
+    backoffice: tradActs(),
+    frontend: tradActs()
   });
+  const defaultTplNames = () => ({ trad: "QA Tradicional", express: "QA Express", backoffice: "Back Office", frontend: "Front-end" });
   const defaultRoles = () => ["QA Funcional", "QA Automatizador"];
   const emptyStore = () => ({ clients: [], members: [], roles: defaultRoles(), templates: defaultTemplates(), reqs: [] });
-  const normalize = o => { o.roles ||= defaultRoles(); o.templates ||= defaultTemplates(); o.templates.express ||= defaultTemplates().express; o.customTpl ||= []; ["trad", "express"].forEach(k => o.templates[k].forEach(t => { t.unit ||= "d"; })); o.customTpl.forEach(c => (c.acts ||= []).forEach(t => { t.unit ||= "d"; })); o.members ||= []; o.leaders ||= []; if (!Array.isArray(o.leaderRoles)) o.leaderRoles = ["Líder técnico", "Líder de proyecto", "Coordinador", "Jefatura", "DevOps"]; o.reqs ||= []; o.clients ||= []; if (!o.clients.length) o.clients.push({ id: uid(), name: "General" }); o.reqs.forEach(r => { if (!o.clients.some(c => c.id === r.clientId)) r.clientId = o.clients[0].id; r.comments ||= []; r.leaderIds ||= []; r.acts ||= []; r.deliverables ||= []; r.metrics ||= {}; r.dateLog ||= []; r.committedEnd ||= r.end; r.lastUpdate ||= (r.comments.length ? r.comments[r.comments.length - 1].at : new Date().toISOString()); r.acts.forEach(a => { a.blockReason ||= ""; a.blockedSince ||= ""; }); }); o.members.forEach(m => { m.roles ||= m.role ? [m.role] : []; delete m.role; }); o.notify ||= {}; o.notify.times ||= ["09:00", "12:00", "15:00", "18:00"]; o.notify.days ||= [1, 2, 3, 4, 5]; o.notify.userWebhook ||= ""; o.notify.siteUrl ||= ""; o.clients.forEach(c => { c.planner ||= { enabled: false, planId: "", planName: "", lastSync: "" }; c.teams ||= { enabled: false, webhook: "", events: { sync: true, blocked: true } }; }); o.reqs.forEach(r => { r.priority ||= ""; r.bucket ||= ""; r.id ||= uid(); r.type ||= "trad"; r.status ||= "Pendiente"; r.code = String(r.code ?? ""); r.title = String(r.title ?? "");
+  const normalize = o => { o.roles ||= defaultRoles(); o.templates ||= defaultTemplates(); o.templates.express ||= defaultTemplates().express; o.templates.backoffice ||= defaultTemplates().backoffice; o.templates.frontend ||= defaultTemplates().frontend; o.tplNames = Object.assign(defaultTplNames(), o.tplNames || {}); o.customTpl ||= []; ["trad", "express", "backoffice", "frontend"].forEach(k => o.templates[k].forEach(t => { t.unit ||= "d"; })); o.customTpl.forEach(c => (c.acts ||= []).forEach(t => { t.unit ||= "d"; })); ["trad", "express", "backoffice", "frontend"].forEach(k => ruleDefaults(o.templates[k])); o.customTpl.forEach(c => ruleDefaults(c.acts)); o.members ||= []; o.leaders ||= []; if (!Array.isArray(o.leaderRoles)) o.leaderRoles = ["Líder técnico", "Líder de proyecto", "Coordinador", "Jefatura", "DevOps"]; o.reqs ||= []; o.clients ||= []; if (!o.clients.length) o.clients.push({ id: uid(), name: "General" }); o.reqs.forEach(r => { if (!o.clients.some(c => c.id === r.clientId)) r.clientId = o.clients[0].id; r.comments ||= []; r.leaderIds ||= []; r.acts ||= []; r.deliverables ||= []; r.metrics ||= {}; r.dateLog ||= []; r.committedEnd ||= r.end; r.lastUpdate ||= (r.comments.length ? r.comments[r.comments.length - 1].at : new Date().toISOString()); r.acts.forEach(a => { a.blockReason ||= ""; a.blockedSince ||= ""; }); }); o.members.forEach(m => { m.roles ||= m.role ? [m.role] : []; delete m.role; }); o.notify ||= {}; o.notify.times ||= ["09:00", "12:00", "15:00", "18:00"]; o.notify.days ||= [1, 2, 3, 4, 5]; o.notify.userWebhook ||= ""; o.notify.siteUrl ||= ""; o.clients.forEach(c => { c.planner ||= { enabled: false, planId: "", planName: "", lastSync: "" }; c.teams ||= { enabled: false, webhook: "", events: { sync: true, blocked: true } }; }); o.reqs.forEach(r => { r.priority ||= ""; r.bucket ||= ""; r.id ||= uid(); r.type ||= "trad"; r.status ||= "Pendiente"; r.code = String(r.code ?? ""); r.title = String(r.title ?? "");
       r.acts.forEach(a => { a.id ||= uid(); a.name = String(a.name ?? ""); a.percent = Math.max(0, Math.min(100, +a.percent || 0)); });
       const okd = s => /^\d{4}-\d{2}-\d{2}$/.test(s || ""), t0 = new Date().toISOString().slice(0, 10);
-      if (!okd(r.start)) r.start = r.acts.map(a => a.start).filter(okd).sort()[0] || t0; if (!okd(r.end)) r.end = r.acts.map(a => a.end).filter(okd).sort().pop() || r.start;
-      r.acts.forEach(a => { if (!okd(a.start)) a.start = r.start; if (!okd(a.end)) a.end = a.start; }); });
+      if (r.timeManaged === false) {                  // requerimiento nuevo sin «Gestión del tiempo»: las fechas siguen vacías hasta que se ingresen y se confirmen
+        if (!okd(r.start)) r.start = ""; if (!okd(r.end)) r.end = ""; r.committedEnd = "";
+        r.acts.forEach(a => { if (!okd(a.start)) a.start = ""; if (!okd(a.end)) a.end = ""; });
+      } else {
+        if (!okd(r.start)) r.start = r.acts.map(a => a.start).filter(okd).sort()[0] || t0; if (!okd(r.end)) r.end = r.acts.map(a => a.end).filter(okd).sort().pop() || r.start;
+        r.acts.forEach(a => { if (!okd(a.start)) a.start = r.start; if (!okd(a.end)) a.end = a.start; });
+      } });
     o.members.forEach(m => { m.id ||= uid(); m.name = String(m.name ?? ""); m.email = String(m.email ?? ""); }); o.clients.forEach(c => { c.id ||= uid(); c.teams.events ||= { sync: true, blocked: true }; });
     o.leaders.forEach(l => { l.id ||= uid(); l.name = String(l.name ?? ""); l.email = String(l.email ?? ""); l.roles ||= []; });
     return o; };
